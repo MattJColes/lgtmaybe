@@ -7,8 +7,11 @@ need a clean docs build.
 ## The Bar
 
 A code PR needs **green CI and a behavioural test**. A documentation-only PR
-needs `mkdocs build --strict` to pass locally (CI builds the docs only after
-merge). Specifically:
+needs `mkdocs build --strict` to pass (CI builds the docs on every pull request)
+and the readability checks in `tests/docs` to pass. Follow the style guide in
+[`docs/how-to/write-docs.md`](docs/how-to/write-docs.md): write for an engineer
+new to the project, keep sentences short, and link project terms to the
+[glossary](docs/reference/glossary.md). Specifically:
 
 - **Write the test first for code changes.** Start from the expected input and
   output, watch the test fail, then write the minimum code to pass. A code

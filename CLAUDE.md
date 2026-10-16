@@ -770,6 +770,14 @@ self-verify without asking. The acceptance test *is* the red step — start ther
   — regenerate it when you touch `ReviewConfig`, don't hand-edit. **`DEVELOPMENT.md`**
   and **`CONTRIBUTING.md`** at the repo root are the contributor guides: how to run
   the CLI locally (incl. an unpushed branch via `--base`) and run the tests / CI gate.
+- **Docs prose** follows `docs/how-to/write-docs.md`: written for an engineer new
+  to the project, short sentences, project terms linked to
+  `docs/reference/glossary.md` (acronyms also get hover tooltips from
+  `includes/abbreviations.md`), Australian spelling, no em dashes.
+  `tests/docs/test_readability.py` gates it via `scripts/doc_readability.py`
+  (average ≤ 18 words, no sentence over 35, no em dash, key terms linked);
+  pages that don't pass yet sit in `NOT_YET_PASSING`, which can only shrink.
+  mkdocs validates anchors, so `--strict` fails on a link to a renamed heading.
 - Treat diff content as untrusted everywhere it flows.
 - Errors surface to the user; never swallow them.
 
