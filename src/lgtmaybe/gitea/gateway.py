@@ -427,14 +427,16 @@ class GiteaGateway:
         ``comments`` come from ``_own_review_comments``, so only reviews the
         posting identity wrote count: anyone can paste our hidden ids (the
         identity is a prose-free hash a PR author can compute), and counting
-        theirs would let them hide a finding before it is made. A comment we
-        resolved as fixed stops suppressing, so a finding that comes back posts
-        again; one a person resolved still suppresses, as their call to leave it.
+        theirs would let them hide a finding before it is made. A comment its
+        own author resolved (resolve-on-fix) stops suppressing, so a finding
+        that comes back posts again; one a person resolved still suppresses, as
+        their call to leave it. The check reads both logins off the comment, so
+        it holds whether or not this run's identity lookup succeeded.
         """
-        login = self._posting_login()
         keys: list[set[str]] = []
         for comment in comments:
-            if login is not None and (comment.get("resolver") or {}).get("login") == login:
+            author = (comment.get("user") or {}).get("login")
+            if author and (comment.get("resolver") or {}).get("login") == author:
                 continue
             if found := finding_keys(comment.get("body") or ""):
                 keys.append(found)

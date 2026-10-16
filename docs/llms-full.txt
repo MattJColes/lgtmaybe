@@ -1783,13 +1783,16 @@ same review locally and prints the findings. See
 
 ## What Works, and What Does Not
 
-The same as on Gitea, because it is the same adapter. Every lens, reflection,
-[redaction](../reference/glossary.md#redaction), static analysis, labels, the change overview, the `fail_on` gate and
-slash commands work.
-[Incremental review](../reference/glossary.md#incremental-review), resolve-on-fix, 👎 feedback and symbol
-resolution do not. Resolve-on-fix works on Gitea 1.26 or later, but Forgejo has
-no endpoint to resolve a review comment, so fixed findings' comments stay open. The [Gitea page](review-on-gitea.md#what-works-and-what-does-not)
-explains why for each one.
+Mostly the same as on Gitea, because it is the same adapter. Every lens,
+reflection, [redaction](../reference/glossary.md#redaction), static analysis, labels, the change overview, the
+`fail_on` gate and slash commands work.
+[Incremental review](../reference/glossary.md#incremental-review), 👎 feedback and symbol resolution do not.
+The [Gitea page](review-on-gitea.md#what-works-and-what-does-not) explains why
+for each one.
+
+Resolve-on-fix never happens on Forgejo. Forgejo has no endpoint to resolve a
+review comment, so fixed findings' comments stay open for a person to close.
+This is the one place Forgejo differs from Gitea, which resolves them from 1.26.
 
 ## Security
 
