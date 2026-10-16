@@ -195,6 +195,33 @@ class TestPostReview:
         assert listed.call_count == 1
 
     @respx.mock
+    def test_a_note_posted_this_run_is_edited_by_a_same_run_notice(self) -> None:
+        """A posted note joins the run's cache, so a later notice edits it.
+
+        First review on an MR: the summary posts, then a required diagram call
+        fails and the CLI posts a failure notice. That notice re-reads the
+        watermark and re-finds the summary; a stale cache would miss both and
+        post a second summary note the run then edits forever.
+        """
+        listed = respx.route(method="GET", url__startswith=f"{MR_URL}/notes").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        create = respx.post(f"{MR_URL}/notes").mock(
+            return_value=httpx.Response(201, json={"id": 1})
+        )
+        edit = respx.put(f"{MR_URL}/notes/1").mock(return_value=httpx.Response(200, json={}))
+        gateway = _gateway()
+
+        gateway.post_review([], "summary", diff=DIFF)
+        gateway.mark_reviewed(None)  # what _post_notice does before re-reading
+        assert gateway.last_reviewed_sha() is None
+        gateway.post_review([], "review failed", diff=DIFF)
+
+        assert create.call_count == 1
+        assert edit.called
+        assert listed.call_count == 1
+
+    @respx.mock
     def test_each_finding_becomes_its_own_positioned_discussion(self) -> None:
         """GitLab has no batched review object — a discussion per finding."""
         _stub_post_routes()
