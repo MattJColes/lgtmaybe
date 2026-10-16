@@ -633,6 +633,55 @@ class TestLocalReviewErrors:
         assert result.exit_code != 0
         assert "not a git repository" in result.output
 
+    def test_git_timeout_surfaces_as_a_clean_cli_error(self, monkeypatch):
+        """A hung git must surface as a ClickException naming the command, not
+        a raw traceback: the local module's error is converted at the cli seam."""
+        import lgtmaybe.cli as cli_module
+        from lgtmaybe.local import LocalGitError
+
+        monkeypatch.setattr(cli_module, "build_provider", lambda *a, **k: FakeProvider())
+        monkeypatch.setattr(
+            cli_module, "LLMReviewEngine", lambda provider, **kwargs: FakeEngine(provider)
+        )
+
+        def hung_git(**kwargs):
+            raise LocalGitError("git diff timed out after 120s")
+
+        monkeypatch.setattr(cli_module, "local_pr_context", hung_git)
+
+        result = CliRunner().invoke(main, ["review", "--provider", "ollama", "--model", "llama3"])
+
+        assert result.exit_code != 0
+        assert "Error: git diff timed out after 120s" in result.output
+
+    def test_diagram_git_timeout_surfaces_as_a_clean_cli_error(self, monkeypatch):
+        """The diagram path resolves the default base outside its context call,
+        so a hung git there must also surface as a ClickException."""
+        import click
+
+        import lgtmaybe.cli as cli_module
+        from lgtmaybe.local import LocalGitError
+
+        empty = PRContext(
+            diff="",
+            changed_files=[],
+            base_sha="base",
+            head_sha="head",
+            repo="org/repo",
+            pr_number=0,
+        )
+        monkeypatch.setattr(cli_module, "_local_context", lambda **kwargs: empty)
+
+        def hung_default_base(cwd=None):
+            raise LocalGitError("git rev-parse origin/HEAD timed out after 120s")
+
+        monkeypatch.setattr(cli_module, "_default_base", hung_default_base)
+
+        with pytest.raises(click.ClickException, match="timed out"):
+            cli_module.execute_local_diagram(
+                _default_cfg(), RuntimeOptions(), base=None, working=False
+            )
+
     def test_engine_failure_exits_nonzero(self, monkeypatch):
         _patch_local(monkeypatch, engine=_BoomEngine())
 
