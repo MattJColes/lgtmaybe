@@ -17,6 +17,7 @@ from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextlib import suppress
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
+from enum import Enum
 from typing import Any
 
 import litellm
@@ -121,9 +122,9 @@ _MIN_CACHEABLE_TOKENS = 1024
 # Errors that retrying cannot fix: bad credentials, a malformed/unsupported
 # request, an unknown model, a denied permission, and a content-policy block
 # (ContentPolicyViolationError subclasses BadRequestError, so it's covered).
-# Retrying these just burns the backoff budget — and, stacked across every lens,
-# turns an instant failure into many minutes of wasted runner time (the gpt-5.5
-# quota failure that ran ~13 min before surfacing). Fail fast instead.
+# Retrying these just burns the backoff budget — and, stacked across every
+# lens, turns an instant failure into many minutes of wasted runner time.
+# Fail fast instead.
 _PERMANENT_ERROR_TYPES: tuple[type[Exception], ...] = (
     AuthenticationError,
     BadRequestError,
@@ -229,21 +230,18 @@ def _is_permanent(exc: BaseException) -> bool:
         return True
     # A blown wall clock is not a blip: the retry re-sends the identical request
     # against the identical budget, so attempts 2..N can only fail the same way
-    # and cost another full timeout each. On the generous slow-provider default
-    # that turned one stuck lens into an hour of runner time before the failure
-    # surfaced. One attempt, then say so — and let the fallback model (a genuinely
-    # different request) still have its turn.
+    # and cost another full timeout each. One attempt, then say so — and let
+    # the fallback model (a genuinely different request) still have its turn.
     if isinstance(exc, ProviderWallTimeout):
         return True
     # Nor is a blown output ceiling: at temperature 0 the identical request runs
     # to the identical ceiling, and each attempt costs a full ceiling-length
-    # generation — 65,536 output tokens and 21 minutes, in the run that prompted
-    # this. Same bargain as above: one attempt, then say so, fallback still tried.
-    # This stays permanent even though the ENGINE now retries a truncated call by
-    # splitting the batch: the two are not in tension, they are the division of
-    # labour. Only the engine holds the batch, so only the engine can change the
-    # payload; the adapter can only re-send the same oversized one, which is the
-    # attempt worth refusing.
+    # generation. Same bargain as above: one attempt, then say so, fallback still
+    # tried. This stays permanent even though the ENGINE now retries a truncated
+    # call by splitting the batch: the two are not in tension, they are the
+    # division of labour. Only the engine holds the batch, so only the engine
+    # can change the payload; the adapter can only re-send the same oversized
+    # one, which is the attempt worth refusing.
     if isinstance(exc, ProviderTruncated):
         return True
     # And a refused prompt: the identical request is the identical size. Not
@@ -265,23 +263,16 @@ def _is_permanent(exc: BaseException) -> bool:
 # the next request lands.
 #
 # A capacity 429 is not that. Gateways that meter a key — OpenRouter above all —
-# meter it per MINUTE, so the generic ladder (with tenacity's default `jitter=1`
-# that is roughly 1.1s + 1.2s + 1.4s) puts all four attempts inside the SAME
-# window, where they can only fail identically. That is how three consecutive
-# reviews each came back "1 of 4 review calls failed" on a rate limit while the
-# other three lenses sailed through. So a rate limit gets its own, much slower
-# ladder: long enough for the next attempt to land in a fresh window.
+# meter it per MINUTE, so the generic ladder puts all four attempts inside the
+# SAME window, where they can only fail identically. A rate limit gets its own,
+# much slower ladder: long enough for the next attempt to land in a fresh window.
 #
 # The number that matters is the CUMULATIVE wait, not how long any one of them
-# looks. The first version of this started at 5s and so waited 5s, 10s, 20s —
-# each of them obviously "slow", and all four attempts still landing inside 36
-# seconds, i.e. inside the very minute that had just refused them. It was the
-# same bug it replaced, one order of magnitude out instead of two, and it read
-# as correct because every individual wait did.
-#
-# Starting at 20s puts the attempts at roughly 20s, 60s and 120s: past the first
-# window, and past the second. `_RATE_LIMIT_BACKOFF_MAX` caps the growth so a
-# fourth-attempt wait cannot run away.
+# looks: waits of 5s, 10s and 20s each read as "slow" and still land all four
+# attempts inside the very minute that just refused them. Starting at 20s puts
+# the attempts at roughly 20s, 60s and 120s: past the first window, and past
+# the second. `_RATE_LIMIT_BACKOFF_MAX` caps the growth so a fourth-attempt
+# wait cannot run away.
 #
 # Both ladders stay well inside the call's existing `stop_before_delay` budget
 # (2.5 × timeout — 1,500s on direct cloud, 4,500s on the slow-capable routes
@@ -439,8 +430,8 @@ def _rejects_response_format(exc: Exception) -> bool:
     service rejects the whole request: ``BedrockException - {"message":"The model
     returned the following errors: output_config.format: Extra inputs are not
     permitted"}``. That arrives as a 400 — permanent, so it is never retried —
-    and since every lens sends the same shape, one unsupported field failed the
-    entire review with "every review call failed".
+    and since every lens sends the same shape, one unsupported field fails the
+    entire review.
 
     ``drop_params`` cannot help here: it drops params litellm's capability map
     says a model lacks, and for these models the map says the param is supported.
@@ -455,9 +446,8 @@ def _rejects_response_format(exc: Exception) -> bool:
     support native structured output — a belief keyed on the model id alone, so
     a region or endpoint without the feature refuses the request at the
     Converse layer instead (``extraneous key [outputConfig] is not permitted``,
-    or "This model doesn't support …" prose). Matching only the snake case made
-    exactly those refusals read as permanent, and one unsupported field killed
-    every lens of the review at once.
+    or "This model doesn't support …" prose). Matching only one spelling leaves
+    exactly those refusals reading as permanent.
     """
     return _rejects_field(exc, "response_format", "output_config", "outputconfig", "responseformat")
 
@@ -470,8 +460,8 @@ def _rejects_reasoning_effort(exc: Exception) -> bool:
     ``reasoningConfig`` for other families), and a Bedrock model or region
     without the field 400s on it. The message names ``output_config`` — the
     same word :func:`_rejects_response_format` matches — so without this the
-    refusal was blamed on the SCHEMA: structured output was downgraded for the
-    run, the re-send still carried the effort, and the call failed identically.
+    refusal is blamed on the SCHEMA: structured output gets downgraded for the
+    run, the re-send still carries the effort, and the call fails identically.
     Checked first in :func:`LiteLLMProvider._drop_rejected_param`, and only
     when the request actually carried the effort, so the schema recovery keeps
     running for everything else.
@@ -494,15 +484,12 @@ def _rejects_tool_config(exc: Exception) -> bool:
     server flag it was started without rather than calling the field
     unsupported. vLLM answers ``"auto" tool choice requires
     --enable-auto-tool-choice and --tool-call-parser to be set``, which carries
-    none of ``_REJECTION_PHRASES`` — so without these the 400 read as permanent
-    and killed the review rather than degrading to prompt-instructed JSON.
+    none of ``_REJECTION_PHRASES``, so those phrases stand on their own.
 
     The spaced spellings are Bedrock's. It does not always name the field: a
     model or region without forced tool use answers in prose — "This model
-    doesn't support tool choice of type tool" — which carries no underscore, no
-    camel case, and not even the plural ``tools`` the matcher keyed on. That 400
-    read as unrelated, so it was re-raised and the lens died where it could have
-    degraded.
+    doesn't support tool choice of type tool" — which carries no underscore,
+    no camel case, and not even the plural ``tools``.
     """
     if any(phrase in str(exc).lower() for phrase in _TOOL_PARSER_PHRASES):
         return True
@@ -542,12 +529,11 @@ _BEDROCK_PREFIX = "bedrock/"
 # the OpenAI *strict* subset — and answers "Extra inputs are not permitted" for
 # any keyword outside it, 400ing the whole request before the model ever runs.
 #
-# A WHITELIST, not a blacklist, and that is the point. Issue #531 was
-# ``minimum`` (pydantic's rendering of ``Field(ge=…)`` on ``ReviewFinding.line``
-# and ``confidence``); removing it left ``default`` — which pydantic emits for
-# every field carrying one, ``anchored`` and ``broad`` here — still on the wire
-# for the next report to find. Naming what the subset takes converges; removing
-# what a bug report reached does not.
+# A WHITELIST, not a blacklist, and that is the point: pydantic's rendering of
+# ``Field(ge=…)`` is ``minimum``, and removing a keyword a bug report reached
+# leaves the next one (``default``, emitted for every field carrying one) still
+# on the wire for the next report to find. Naming what the subset takes
+# converges; removing what a bug report reached does not.
 #
 # Everything pruned is a constraint the same pydantic model re-checks when the
 # reply is parsed, so nothing is enforced less by leaving it out. The structural
@@ -741,6 +727,33 @@ litellm.drop_params = True
 litellm.suppress_debug_info = True
 
 
+class _SchemaMode(Enum):
+    """The rung of the structured-output ladder one model stands on.
+
+    One dict entry per model, so a model can never be in two modes at once —
+    the ladder's rungs are mutually exclusive by construction, not by
+    hand-kept-disjoint sets. ``SCHEMA_EXPRESSIBLE`` is schema mode plus the
+    knowledge that the ``response_format`` we send carries a JSON Schema, so
+    the tool rung exists to be stepped down onto.
+    """
+
+    SCHEMA = "schema"  # response_format, exactly as the engine sent it
+    SCHEMA_EXPRESSIBLE = "schema-expressible"  # schema mode, tool rung known
+    TOOL = "tool"  # the schema as a forced tool call
+    NONE = "none"  # prompt-instructed JSON only
+
+
+# One rung down the ladder. SCHEMA steps straight to the floor: without a
+# seen schema there is no tool call to build, and pretending the rung exists
+# would leave the model sending the shape the engine just rejected.
+_SCHEMA_STEP_DOWN = {
+    _SchemaMode.SCHEMA: _SchemaMode.NONE,
+    _SchemaMode.SCHEMA_EXPRESSIBLE: _SchemaMode.TOOL,
+    _SchemaMode.TOOL: _SchemaMode.NONE,
+    _SchemaMode.NONE: _SchemaMode.NONE,
+}
+
+
 class LiteLLMProvider:
     """ProviderClient backed by litellm with retry and optional fallback."""
 
@@ -782,30 +795,15 @@ class LiteLLMProvider:
         self._effort_levels = effort_levels
         self._default_effort = default_effort
         self.default_opts: dict[str, Any] = default_opts
-        # Models that have proved they won't take response_format — either by
-        # 400ing on it or by decoding it to nothing (see _call). Their later
-        # calls skip it up front instead of paying a wasted round-trip first.
-        #
-        # Keyed by MODEL, not by provider instance. One instance serves the
-        # primary and the fallback, and the triage/review/reflect slots share
-        # its credentials, so an instance-wide flag let a rejection by any one
-        # of them silently downgrade the others to prompt-instructed JSON —
-        # a quality regression on the strong model triggered by a model it
-        # never ran.
-        self._schema_dropped: set[str] = set()
-        # Models whose schema now travels as a forced tool call instead (see
-        # `_schema_tool_kwargs`). Disjoint from `_schema_dropped`: this set is
-        # enforcement preserved by another mechanism, that one is enforcement
-        # given up. Keyed by MODEL for the same reason.
-        self._schema_tool: set[str] = set()
-        # Models whose `response_format` has been seen to carry a JSON Schema,
-        # so the tool rung exists for them. Only `_call` can know this — it sees
-        # the request — and only `drop_response_format` needs it, because that
-        # one is asked to step down with no request in hand. A `response_format`
-        # with no schema in it (`{"type": "json_object"}`) cannot become a tool
-        # at all, and pretending that rung exists would leave the model sending
-        # the shape the engine just rejected. Keyed by MODEL like the two above.
-        self._schema_expressible: set[str] = set()
+        # Where each model's structured output stands on the ladder (see
+        # `_SchemaMode`): enforcement preserved by another mechanism, or given
+        # up. Keyed by MODEL, not by provider instance. One instance serves
+        # the primary and the fallback, and the triage/review/reflect slots
+        # share its credentials, so an instance-wide flag let a rejection by
+        # any one of them silently downgrade the others to prompt-instructed
+        # JSON — a quality regression on the strong model triggered by a model
+        # it never ran.
+        self._schema_modes: dict[str, _SchemaMode] = {}
         # What each model's route takes, as litellm's per-route list answers it
         # (see `_honour_route_schema_support`): None for a route the lookup
         # could not name. A memo of the LOOKUP only — the decision it feeds is
@@ -834,9 +832,9 @@ class LiteLLMProvider:
         400 naming the field, an empty body. A third case leaves none: litellm
         runs with ``drop_params``, which strips every OpenAI-vocabulary param a
         route's own supported-params list omits, silently, before the request
-        goes out. The zai route lists ``tools`` but not ``response_format``, so
-        the schema vanished on the wire, the model answered prose, and this
-        adapter still reported enforcement was on.
+        goes out. A route that lists ``tools`` but not ``response_format`` (the
+        zai route does) makes the schema vanish on the wire while this adapter
+        still reports enforcement was on.
 
         So the same list litellm consults is consulted here first: a route that
         omits ``response_format`` but takes ``tools`` gets the schema as the
@@ -846,16 +844,16 @@ class LiteLLMProvider:
         schema on: the request-level recoveries still cover it, and a capability
         lookup must never cost enforcement on a route that would have taken it.
 
-        The lookup is memoised per model; the decision is not. The lens fan-out
-        calls this concurrently on one instance, and a "probed" marker set
-        before the outcome was recorded let a second lens skip the probe, find
-        neither set populated yet, and send the schema litellm then dropped. Each
-        call deriving its own answer from the same list cannot race: the sets
-        the outcome lands in are idempotent, and the announcements fire once.
-        A model that has since given the schema up entirely keeps that: the
-        route's list must not re-enable a tool the route already refused.
+        The lookup is memoised per model; the decision is not: the lens fan-out
+        calls this concurrently on one instance, and a lens that arrived while a
+        sibling's first call was still being shaped must derive the same answer
+        for itself rather than read a half-recorded marker. Each call deriving
+        its own answer from the same list cannot race: the mode it lands in is
+        idempotent, and the announcements fire once. A model that has since
+        given the schema up entirely keeps that: the route's list must not
+        re-enable a tool the route already refused.
         """
-        if kwargs.get("response_format") is None or model in self._schema_dropped:
+        if kwargs.get("response_format") is None or self._mode_of(model) is _SchemaMode.NONE:
             return
         if model not in self._route_params:
             self._route_params[model] = _supported_params(model)
@@ -864,7 +862,7 @@ class LiteLLMProvider:
             return
         if "tools" in supported and self._use_schema_tool(model, kwargs):
             return
-        self._disable_response_format(model, "route-unsupported")
+        self._set_schema_mode(model, _SchemaMode.NONE, "route-unsupported")
         self._strip_schema(kwargs)
 
     def input_budget(self) -> int | None:
@@ -906,30 +904,30 @@ class LiteLLMProvider:
         )
         return int(window) // 2
 
-    def _disable_response_format(self, model: str, why: str) -> None:
-        """Record — and announce — that *model* will not take the schema.
+    def _mode_of(self, model: str) -> _SchemaMode:
+        """The rung *model* stands on; a model never seen is still in schema mode."""
+        return self._schema_modes.get(model, _SchemaMode.SCHEMA)
 
-        Announced because the consequence is invisible otherwise: every later
-        call for this model falls back to prompt-instructed JSON, and a model
-        that then answers in prose surfaces as "every review lens returned
-        unparseable output" with nothing connecting the two. This repo already
-        holds itself to that rule for every other param (``provider.factory``
-        names the ones litellm's map says will be discarded); the schema drop
-        was the one exemption.
+    def _set_schema_mode(self, model: str, mode: _SchemaMode, why: str) -> bool:
+        """Move *model* to *mode*; True when the rung actually changed.
 
-        Once per model, not once per lens: the fan-out sends the same shape N
-        times and N identical warnings would bury the one that matters.
+        The floor is announced because the consequence is invisible otherwise:
+        every later call for this model falls back to prompt-instructed JSON,
+        and a model that then answers in prose surfaces as "every review lens
+        returned unparseable output" with nothing connecting the two. Once per
+        model, not once per lens: the fan-out sends the same shape N times and
+        N identical warnings would bury the one that matters.
         """
-        if model in self._schema_dropped:
-            return
-        self._schema_dropped.add(model)
-        # Tool mode was enforcement; giving up on the schema retires it too.
-        self._schema_tool.discard(model)
-        _log.warning(
-            "structured output disabled for this model — later calls send "
-            "prompt-instructed JSON only, which a weaker model may not honour",
-            extra={"model": model, "reason": why},
-        )
+        if self._mode_of(model) is mode:
+            return False
+        self._schema_modes[model] = mode
+        if mode is _SchemaMode.NONE:
+            _log.warning(
+                "structured output disabled for this model — later calls send "
+                "prompt-instructed JSON only, which a weaker model may not honour",
+                extra={"model": model, "reason": why},
+            )
+        return True
 
     def _use_schema_tool(self, model: str, kwargs: dict[str, Any]) -> bool:
         """Swap this request's ``response_format`` for the equivalent tool call.
@@ -940,9 +938,10 @@ class LiteLLMProvider:
         the real downgrade.
 
         Announced at info, not warning, precisely because it is *not* the
-        downgrade ``_disable_response_format`` announces: the model is still held
-        to the schema, just through the mechanism its route implements. Once per
-        model, like that warning — the lens fan-out sends the same shape N times.
+        downgrade the floor announcement warns about: the model is still held
+        to the schema, just through the mechanism its route implements. Once
+        per model, like that warning — the lens fan-out sends the same shape
+        N times.
         """
         tools = kwargs.get("tools")
         if tools is not None and not _is_schema_tool(tools):
@@ -954,8 +953,7 @@ class LiteLLMProvider:
             return False
         kwargs.pop("response_format", None)
         kwargs.update(tool_kwargs)
-        if model not in self._schema_tool:
-            self._schema_tool.add(model)
+        if self._set_schema_mode(model, _SchemaMode.TOOL, "tool"):
             _log.info(
                 "structured output sent as a forced tool call for this model — "
                 "the schema is still enforced",
@@ -974,28 +972,24 @@ class LiteLLMProvider:
 
         The ladder is the same either way, which is the whole point of routing it
         here. Marking the model for tool mode is enough to demote it: the next
-        ``_call`` reads that set and swaps the schema over before the request
-        goes out. Straight to the floor — what this used to do — meant one
-        unparseable reply on one lens cost enforcement for every later call of
-        the run, including the mechanism that reply was never produced under.
+        ``_call`` reads the mode and swaps the schema over before the request
+        goes out. Going straight to the floor instead would let one unparseable
+        reply on one lens cost enforcement for every later call of the run,
+        including the mechanism that reply was never produced under.
 
         The rung has to exist, though. A ``response_format`` carrying no JSON
         Schema cannot become a tool, so for a model that has only ever sent one
         of those the tool mode would be a no-op and the model would keep sending
         the shape the engine just rejected — the floor is the honest answer
-        there.
+        there (see `_SCHEMA_STEP_DOWN`).
         """
-        if model in self._schema_dropped:
-            return
-        if model in self._schema_tool or model not in self._schema_expressible:
-            self._disable_response_format(model, why)
-            return
-        self._schema_tool.add(model)
-        _log.info(
-            "structured output stepped down to a forced tool call for this model — "
-            "the schema is still enforced",
-            extra={"model": model, "reason": why},
-        )
+        if self._set_schema_mode(model, _SCHEMA_STEP_DOWN[self._mode_of(model)], why):
+            if self._mode_of(model) is _SchemaMode.TOOL:
+                _log.info(
+                    "structured output stepped down to a forced tool call for this model — "
+                    "the schema is still enforced",
+                    extra={"model": model, "reason": why},
+                )
 
     @staticmethod
     def _strip_schema(kwargs: dict[str, Any]) -> None:
@@ -1063,7 +1057,7 @@ class LiteLLMProvider:
 
         Keyed as ``complete`` resolves the model, like ``drop_response_format``.
         """
-        return self._resolve_model(model) not in self._schema_dropped
+        return self._mode_of(self._resolve_model(model)) is not _SchemaMode.NONE
 
     def schema_dropped(self) -> bool:
         """Whether any model lost ``response_format`` during this run.
@@ -1074,7 +1068,7 @@ class LiteLLMProvider:
         method would oblige every fake and every future adapter to answer a
         question only this one can.
         """
-        return bool(self._schema_dropped)
+        return any(mode is _SchemaMode.NONE for mode in self._schema_modes.values())
 
     def temperature_dropped(self) -> bool:
         """Whether a configured ``temperature`` never reached a model this run.
@@ -1122,13 +1116,11 @@ class LiteLLMProvider:
         be moved down from.
 
         With NO effort configured the step is to ``_EFFORT_FLOOR`` rather than
-        nowhere. That case used to answer ``None`` — to keep a run that never set
-        an effort sending byte-identical requests — but it is the very
-        configuration that produces this failure: a model reasoning at its own
-        default is the one that spends a whole output ceiling thinking, and
-        answering ``None`` left it the only model with no lever at all. The
-        byte-identical guarantee is unaffected, because this is consulted ONLY
-        after a reasoning-bound truncation: a healthy call never reaches here.
+        nowhere: a model reasoning at its own default is the very one that
+        spends a whole output ceiling thinking, and answering ``None`` there
+        would leave it the only model with no lever at all. The byte-identical
+        guarantee is unaffected, because this is consulted ONLY after a
+        reasoning-bound truncation: a healthy call never reaches here.
 
         Where litellm's map declares the efforts this model accepts, the step
         skips the rungs it refuses — gpt-5.5 takes `none` but not `minimal`, so
@@ -1151,20 +1143,19 @@ class LiteLLMProvider:
         resolved, and returned as an override rather than mutated in place: this
         is one retry's request, not a new setting for the rest of the run.
         """
-        levels, default = _effort_capability(self)
-        return _effort_override(self, lambda current: _step_down(current, levels, default))
+        return self._effort_override(
+            lambda current: _step_down(current, self._effort_levels, self._default_effort)
+        )
 
     def disable_reasoning(self) -> dict[str, Any] | None:
         """Per-call opts that switch this provider's reasoning off entirely.
 
         The rung below :meth:`lower_reasoning_effort`, for a model whose thinking
-        is a switch rather than a dial. Measured on GLM 5.3 through OpenRouter
-        (three rounds on one large PR): a `low` call spent its whole
-        12,288-token ceiling thinking, the step-down to `minimal` spent the whole
-        ceiling identically in 10 of 11 retries, and the fallback model did the
-        same. The graded levels do not move that model; ``none`` does. Consulted
-        by the engine ONLY after a step-down retry was itself reasoning-bound, so
-        a healthy call — and a model the step-down does fix — never sends it.
+        is a switch rather than a dial: some models spend the whole output
+        ceiling thinking at every graded level, and only ``none`` moves them.
+        Consulted by the engine ONLY after a step-down retry was itself
+        reasoning-bound, so a healthy call — and a model the step-down does
+        fix — never sends it.
 
         ``None`` when there is nothing to switch: reasoning already off, or a flat
         route whose capability map would strip the param and re-send the request
@@ -1179,8 +1170,56 @@ class LiteLLMProvider:
         ``reasoning`` object for OpenRouter), and an override rather than a
         mutation, for the same reasons.
         """
-        levels, default = _effort_capability(self)
-        return _effort_override(self, lambda current: _switch_off(current, levels, default))
+        return self._effort_override(
+            lambda current: _switch_off(current, self._effort_levels, self._default_effort)
+        )
+
+    def _effort_override(self, choose: Callable[[str | None], str | None]) -> dict[str, Any] | None:
+        """Build one retry's effort override in this provider's own shape.
+
+        *choose* maps the configured effort (``None`` when nothing is
+        configured) to the level to send, or ``None`` for "nothing to send".
+        The shape is decided here, once, for both the step-down and the off
+        switch. Which levels the model accepts is *choose*'s business, not
+        this method's.
+        """
+        flat = self.default_opts.get("reasoning_effort")
+        if isinstance(flat, str):
+            target = choose(flat)
+            return {"reasoning_effort": target} if target else None
+        raw_extra = self.default_opts.get("extra_body")
+        extra: dict[str, Any] = raw_extra if isinstance(raw_extra, dict) else {}
+        nested = extra.get("reasoning")
+        if isinstance(nested, dict) and isinstance(nested.get("effort"), str):
+            target = choose(nested["effort"])
+            if not target:
+                return None
+            # The whole extra_body is replaced, not deep-merged: `complete` merges
+            # per-call opts over the defaults a key at a time, so a partial
+            # extra_body here would drop every other key it carries.
+            return {"extra_body": {**extra, "reasoning": {**nested, "effort": target}}}
+        target = choose(None)
+        if not target:
+            return None
+        # Nothing configured in either shape, so the override picks its own shape —
+        # from the ROUTE, never from whether `extra_body` happens to exist, which
+        # a caller may set for any unrelated provider option.
+        #
+        # OpenRouter gets the nested object for the same reason the factory
+        # re-routes a configured effort into it: litellm forwards the flat param
+        # only for models its capability map flags reasoning-capable, and the
+        # newest models are not in that map — exactly the set that truncates this
+        # way. A flat param there would be dropped and the retry would fail
+        # identically. OpenRouter takes the nested object regardless of model.
+        if self.model.startswith(_OPENROUTER_PREFIX):
+            return {"extra_body": {**extra, "reasoning": {"effort": target}}}
+        # Flat param, so `drop_params` gets a say. A route whose capability entry
+        # omits it would have the override stripped and re-send the request that
+        # just failed — billed twice for one answer. Report the original failure
+        # instead; the engine already stops when this answers None.
+        if not self._effort_override_supported:
+            return None
+        return {"reasoning_effort": target}
 
     def escalate_model(self) -> str | None:
         """The resolved fallback model, for a caller that owns the escalation.
@@ -1206,8 +1245,7 @@ class LiteLLMProvider:
         merged = {**self.default_opts, **opts}
         merged.setdefault("timeout", CLOUD_TIMEOUT)
         # We own retries (tenacity, below). Disable litellm's own retry loop so a
-        # failure isn't ground through two stacked backoff layers — the doubling
-        # that helped a quota error run ~13 min before it surfaced.
+        # failure isn't ground through two stacked backoff layers.
         merged.setdefault("num_retries", 0)
         # Sticky-routing / cache-routing hint, keyed on the shared prefix.
         # OpenRouter pins a conversation to one provider endpoint to keep its
@@ -1319,64 +1357,25 @@ class LiteLLMProvider:
             # refuses) the schema, so don't pay the wasted round-trip again —
             # apply either up front.
             self._honour_route_schema_support(model, kwargs)
-            if _json_schema_of(kwargs.get("response_format")) is not None:
-                self._schema_expressible.add(model)
+            if (
+                self._mode_of(model) is _SchemaMode.SCHEMA
+                and _json_schema_of(kwargs.get("response_format")) is not None
+            ):
+                # The tool rung exists for this model from now on; a model
+                # already past schema mode keeps the rung it stands on.
+                self._set_schema_mode(model, _SchemaMode.SCHEMA_EXPRESSIBLE, "expressible")
             for param in self._rejected_params.get(model, ()):
                 kwargs.pop(param, None)
-            if model in self._schema_dropped:
+            mode = self._mode_of(model)
+            if mode is _SchemaMode.NONE:
                 self._strip_schema(kwargs)
-            elif model in self._schema_tool:
+            elif mode is _SchemaMode.TOOL:
                 self._use_schema_tool(model, kwargs)
             result = self._raw_completion(model, messages, kwargs, count_request)
-            # An empty completion is never a valid answer: a lens that found
-            # nothing still owes `{"findings": []}`. So retry once, whatever the
-            # request carried.
-            #
-            # Some grammar-constrained backends (notably LM Studio fronting a
-            # "thinking" model like qwen3.x) return EMPTY content under a
-            # response_format JSON schema — the schema decoder yields nothing. A
-            # route that accepts `tools` and then ignores them is the same dead
-            # end (nothing in the content, no tool call to read instead). Where
-            # the request carried one, the schema is the first suspect, so it is
-            # dropped before the retry and remembered so later calls skip it.
-            #
-            # Where it carried no schema the retry still happens, and used not
-            # to. That left the case with NO recovery anywhere: the engine
-            # cannot reformat an empty body (`repair_findings` returns None on
-            # one) and has no schema left to drop, so the lens failed outright —
-            # seen in the field as "unparseable model output (empty)" on a run
-            # where an earlier call had already disabled structured output. An
-            # empty body carries no evidence that the request was at fault, and
-            # re-issuing it is the only move left.
-            #
-            # One retry, never a loop: `_raw_completion` is called at most twice
-            # here, so a model answering empty twice reports empty rather than
-            # spending a third call.
             if not result.text.strip():
-                # The empty body was still generated and still billed, so its
-                # price rides onto the re-sent attempt's — a call recovered
-                # here must not report only the recovery's cost (the same
-                # rule `attempts` follows for the extra request).
-                spent_cost = result.cost_usd
-                # ONE RUNG, not the floor. An empty body is evidence against the
-                # mechanism that was in play, not against structured output as a
-                # whole — so a schema-mode blip is re-sent as the forced tool
-                # call first, and only an empty reply under THAT gives the schema
-                # up. Going straight to the floor here made a single empty reply
-                # on one lens cost enforcement for every later call of the run:
-                # the fan-out shares one provider instance, the drop is keyed by
-                # model, and nothing ever lifts it. On bedrock it skipped the one
-                # mechanism Converse actually implements.
-                had_schema = kwargs.get("response_format") is not None
-                demoted = had_schema and self._use_schema_tool(model, kwargs)
-                if not demoted and (had_schema or _is_schema_tool(kwargs.get("tools"))):
-                    self._disable_response_format(model, "empty-response")
-                    self._strip_schema(kwargs)
-                result = self._raw_completion(model, messages, kwargs, count_request)
-                if spent_cost is not None:
-                    result = result.model_copy(
-                        update={"cost_usd": _merged_cost(spent_cost, result.cost_usd)}
-                    )
+                result = self._retry_after_empty_reply(
+                    model, messages, kwargs, result, count_request
+                )
             return result
 
         try:
@@ -1392,6 +1391,49 @@ class LiteLLMProvider:
                 stamp_unrecoverable(exc)
             raise
         return result.model_copy(update={"attempts": attempts})
+
+    def _retry_after_empty_reply(
+        self,
+        model: str,
+        messages: list[Message],
+        kwargs: dict[str, Any],
+        result: ProviderResult,
+        count_request: Callable[[], None],
+    ) -> ProviderResult:
+        """Re-send a request whose reply came back empty: once, one rung down.
+
+        An empty completion is never a valid answer: a lens that found nothing
+        still owes `{"findings": []}`. Some grammar-constrained backends return
+        EMPTY content under a response_format JSON schema — the schema decoder
+        yields nothing — and a route that accepts `tools` and then ignores them
+        is the same dead end. Where the request carried a schema it is the
+        first suspect, so the re-send steps the schema down first; where it
+        carried none, the engine has no remedy for an empty body either
+        (`repair_findings` returns None on one), so re-issuing the request is
+        the only move left.
+
+        One re-send, never a loop: a model answering empty twice reports empty
+        rather than spending a third call. The empty body was still billed, so
+        its price rides onto the re-send's, like the extra attempt does.
+        """
+        spent_cost = result.cost_usd
+        # ONE RUNG, not the floor: an empty body is evidence against the
+        # mechanism that was in play, not against structured output as a whole.
+        # The drop is keyed by model on an instance the whole fan-out shares and
+        # is never lifted, so going straight to the floor would cost enforcement
+        # for every later call of the run — and on bedrock it would skip the one
+        # mechanism Converse actually implements.
+        had_schema = kwargs.get("response_format") is not None
+        demoted = had_schema and self._use_schema_tool(model, kwargs)
+        if not demoted and (had_schema or _is_schema_tool(kwargs.get("tools"))):
+            self._set_schema_mode(model, _SchemaMode.NONE, "empty-response")
+            self._strip_schema(kwargs)
+        result = self._raw_completion(model, messages, kwargs, count_request)
+        if spent_cost is not None:
+            result = result.model_copy(
+                update={"cost_usd": _merged_cost(spent_cost, result.cost_usd)}
+            )
+        return result
 
     def _raw_completion(
         self,
@@ -1476,7 +1518,7 @@ class LiteLLMProvider:
         # without that every one of them pays its own rejected round-trip first.
         if kwargs.get("response_format") is not None and _rejects_response_format(exc):
             if not self._use_schema_tool(model, kwargs):
-                self._disable_response_format(model, "rejected")
+                self._set_schema_mode(model, _SchemaMode.NONE, "rejected")
                 kwargs.pop("response_format")
             return True
         # The schema is in flight but the refusal names a TOOL field, and there
@@ -1485,12 +1527,11 @@ class LiteLLMProvider:
         # does not flag for native structured output, which is most of them: a
         # forced ``json_tool_call`` this adapter never sees in ``kwargs``.
         #
-        # Neither recovery could fire. The matcher above does not know the word
-        # ``toolConfig``, and ``_is_schema_tool`` is False because the tool was
-        # never ours — so a permanent 400 ended the lens on exactly the models
-        # the tool fallback exists for. Swapping OUR tool in would re-send the
-        # same forced-tool shape the route just refused, at the same ceiling, so
-        # this rung is the floor: prompt-instructed JSON, announced.
+        # Neither recovery above can fire here: the response_format matcher
+        # does not know the word ``toolConfig``, and ``_is_schema_tool`` is
+        # False because the tool was never ours. Swapping OUR tool in would
+        # re-send the same forced-tool shape the route just refused, at the same
+        # ceiling, so this rung is the floor: prompt-instructed JSON, announced.
         #
         # Only when the caller brought no tools. With theirs on the request a
         # ``toolConfig`` refusal may be about theirs, and guessing would disable
@@ -1500,11 +1541,11 @@ class LiteLLMProvider:
             and kwargs.get("tools") is None
             and _rejects_tool_config(exc)
         ):
-            self._disable_response_format(model, "internal-tool-rejected")
+            self._set_schema_mode(model, _SchemaMode.NONE, "internal-tool-rejected")
             self._strip_schema(kwargs)
             return True
         if _is_schema_tool(kwargs.get("tools")) and _rejects_tool_config(exc):
-            self._disable_response_format(model, "tool-rejected")
+            self._set_schema_mode(model, _SchemaMode.NONE, "tool-rejected")
             self._strip_schema(kwargs)
             return True
         return False
@@ -1596,32 +1637,27 @@ class LiteLLMProvider:
         # body travels with it: unusable as an answer, but the findings finished
         # before the cut are real, and the engine salvages them from it.
         #
-        # The ceiling is named as `max_tokens`, NOT as "the model's limit": in the
-        # run that prompted this it was lgtmaybe's own configured 16,384 against a
-        # model good for 65,536, so blaming the model sends the reader to a knob
-        # they cannot move. The reasoning count is named when the route reports it,
-        # because it is the whole explanation for a fifteen-line diff truncating —
-        # a reasoning model spends this same budget on thought before it writes a
-        # single finding.
+        # The ceiling is named as `max_tokens`, NOT as "the model's limit": the
+        # configured ceiling can sit below what the model is good for, and
+        # blaming the model sends the reader to a knob they cannot move. The
+        # reasoning count is named when the route reports it, because it is the
+        # whole explanation for a fifteen-line diff truncating — a reasoning
+        # model spends this same budget on thought before it writes a single
+        # finding.
         #
-        # The advice deliberately does NOT say "raise `max_tokens`". Measured (see
-        # .lgtmaybe.yml): the dominant truncation is a CONTENT runaway — ~961
-        # tokens of thought against ~32,700 of output, zero findings salvaged, on
-        # roughly one lens call in five — which no ceiling prevents. Raising it
-        # only buys a larger wasted call: at 32k a single runaway was 80-93% of a
-        # review's wall clock, at 8k it is ~95s. The engine already splits the
-        # batch, so the reader's real lever is the model, not this number.
+        # The advice deliberately does NOT say "raise `max_tokens`": the dominant
+        # truncation is a CONTENT runaway, which no ceiling prevents, and raising
+        # it only buys a larger wasted call. The engine already splits the batch,
+        # so the reader's real lever is the model, not this number.
         #
         # Second test, for the routes that never say it. litellm maps an
         # unrecognised finish reason to `stop`, and ollama's route reports
         # nothing useful at all, so a call cut off at the cap arrives looking
-        # like a clean finish — measured on a local benchmark as two lens calls
-        # reporting exactly the configured 512 output tokens with an empty error
-        # column, which had the tooling downstream counting zero truncations.
-        # Spending the ceiling to the token is not a stopping point a model
-        # chooses; it is what being cut off looks like from the outside. Only
-        # ever applied against a ceiling WE set — with none configured there is
-        # nothing to compare against and a long answer is just a long answer.
+        # like a clean finish. Spending the ceiling to the token is not a
+        # stopping point a model chooses; it is what being cut off looks like
+        # from the outside. Only ever applied against a ceiling WE set — with
+        # none configured there is nothing to compare against and a long answer
+        # is just a long answer.
         if _finish_reason(response) == "length" or _spent_the_ceiling(output_tokens, ceiling):
             reasoning = _reasoning_tokens(usage)
             detail = f" ({reasoning} reasoning)" if reasoning else ""
@@ -1721,16 +1757,6 @@ def _one_level_lower(effort: str, levels: frozenset[str] | None = None) -> str |
     )
 
 
-def _effort_capability(provider: Any) -> tuple[frozenset[str] | None, str | None]:
-    """The declared efforts and default *provider* was built with.
-
-    Read with a default because the probes are borrowed unbound onto test fakes
-    that predate both attributes — and a provider that never learnt them is
-    exactly a model the map does not describe.
-    """
-    return getattr(provider, "_effort_levels", None), getattr(provider, "_default_effort", None)
-
-
 def _step_down(
     current: str | None, levels: frozenset[str] | None, default: str | None
 ) -> str | None:
@@ -1765,59 +1791,6 @@ def _switch_off(
     if levels is not None and _EFFORT_OFF not in levels:
         return None
     return _EFFORT_OFF
-
-
-def _effort_override(
-    provider: Any, choose: Callable[[str | None], str | None]
-) -> dict[str, Any] | None:
-    """Build one retry's effort override in *provider*'s own shape.
-
-    *choose* maps the configured effort (``None`` when nothing is configured)
-    to the level to send, or ``None`` for "nothing to send". The shape is
-    decided here, once, for both the step-down and the off switch. A module
-    function rather than a method because the adapter's two public probes are
-    borrowed unbound onto test fakes, which only carry the three attributes read
-    here (``default_opts``, ``model``, ``_effort_override_supported``). Which
-    levels the model accepts is *choose*'s business, not this function's (see
-    :func:`_effort_capability`).
-    """
-    flat = provider.default_opts.get("reasoning_effort")
-    if isinstance(flat, str):
-        target = choose(flat)
-        return {"reasoning_effort": target} if target else None
-    raw_extra = provider.default_opts.get("extra_body")
-    extra: dict[str, Any] = raw_extra if isinstance(raw_extra, dict) else {}
-    nested = extra.get("reasoning")
-    if isinstance(nested, dict) and isinstance(nested.get("effort"), str):
-        target = choose(nested["effort"])
-        if not target:
-            return None
-        # The whole extra_body is replaced, not deep-merged: `complete` merges
-        # per-call opts over the defaults a key at a time, so a partial
-        # extra_body here would drop every other key it carries.
-        return {"extra_body": {**extra, "reasoning": {**nested, "effort": target}}}
-    target = choose(None)
-    if not target:
-        return None
-    # Nothing configured in either shape, so the override picks its own shape —
-    # from the ROUTE, never from whether `extra_body` happens to exist, which
-    # a caller may set for any unrelated provider option.
-    #
-    # OpenRouter gets the nested object for the same reason the factory
-    # re-routes a configured effort into it: litellm forwards the flat param
-    # only for models its capability map flags reasoning-capable, and the
-    # newest models are not in that map — exactly the set that truncates this
-    # way. A flat param there would be dropped and the retry would fail
-    # identically. OpenRouter takes the nested object regardless of model.
-    if provider.model.startswith(_OPENROUTER_PREFIX):
-        return {"extra_body": {**extra, "reasoning": {"effort": target}}}
-    # Flat param, so `drop_params` gets a say. A route whose capability entry
-    # omits it would have the override stripped and re-send the request that
-    # just failed — billed twice for one answer. Report the original failure
-    # instead; the engine already stops when this answers None.
-    if not provider._effort_override_supported:
-        return None
-    return {"reasoning_effort": target}
 
 
 def _configured_ceiling(kwargs: dict[str, Any]) -> int | None:
