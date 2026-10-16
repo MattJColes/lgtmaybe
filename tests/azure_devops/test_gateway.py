@@ -1404,6 +1404,7 @@ class TestCapabilities:
             "SupportsDescribe",
             "SupportsDiagram",
             "SupportsConversation",
+            "SupportsScanManifests",
         ):
             assert isinstance(gateway, getattr(ports, name)), name
 
