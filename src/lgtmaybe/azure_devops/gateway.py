@@ -40,7 +40,6 @@ import base64
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from difflib import SequenceMatcher
 from enum import Enum
 from typing import Any
 from urllib.parse import quote
@@ -64,6 +63,7 @@ from lgtmaybe.core.diff import (
     build_commentable_lines,
     is_reviewable,
     is_scannable_manifest,
+    line_changed,
 )
 from lgtmaybe.core.diffbuild import binary_file_patch, file_patch, has_unsafe_path_chars
 from lgtmaybe.core.logging import get_logger
@@ -943,14 +943,7 @@ class AzureDevOpsGateway:
                 return True  # the file is gone from the head
             if not isinstance(after, str):
                 return False
-            old_lines = before.split("\n")
-            if line > len(old_lines):
-                return False
-            matcher = SequenceMatcher(None, old_lines, after.split("\n"), autojunk=False)
-            return any(
-                tag in ("replace", "delete") and i1 < line <= i2
-                for tag, i1, i2, _j1, _j2 in matcher.get_opcodes()
-            )
+            return line_changed(before, after, line)
         except Exception as exc:  # noqa: BLE001 (fail closed: leave the thread open)
             _log.warning("telling whether thread %s is outdated failed: %s", thread.get("id"), exc)
             return False

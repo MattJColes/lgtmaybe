@@ -301,6 +301,7 @@ _GATEWAY_BUILDERS: dict[Forge, Callable[[PRLocator, str, ReviewConfig], ReviewGa
         pr_number=located.number,
         token=token,
         marker_key=_marker_key(cfg),
+        resolve_fixed=cfg.resolve_fixed,
         scheme=located.scheme,
     ),
     Forge.azure_devops: lambda located, token, cfg: AzureDevOpsGateway(

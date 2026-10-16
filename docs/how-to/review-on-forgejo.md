@@ -152,7 +152,8 @@ The same as on Gitea, because it is the same adapter. Every lens, reflection,
 [redaction](../reference/glossary.md#redaction), static analysis, labels, the change overview, the `fail_on` gate and
 slash commands work.
 [Incremental review](../reference/glossary.md#incremental-review), resolve-on-fix, 👎 feedback and symbol
-resolution do not. The [Gitea page](review-on-gitea.md#what-works-and-what-does-not)
+resolution do not. Resolve-on-fix works on Gitea 1.26 or later, but Forgejo has
+no endpoint to resolve a review comment, so fixed findings' comments stay open. The [Gitea page](review-on-gitea.md#what-works-and-what-does-not)
 explains why for each one.
 
 ## Security

@@ -19,12 +19,16 @@ review to save tokens and avoid noise.
 
 Diff fingerprint: what a rebase leaves alone, so a stacked PR rebased onto its
 merged parent is not reviewed again.
+
+Line change: whether the line a finding comment was posted on was replaced or
+removed since, for forges that expose no "outdated" flag of their own.
 """
 
 from __future__ import annotations
 
 import hashlib
 import re
+from difflib import SequenceMatcher
 from fnmatch import fnmatchcase
 from pathlib import PurePosixPath
 
@@ -285,3 +289,25 @@ def is_scannable_manifest(path: str) -> bool:
     if name in _LOCKFILES or name in _MANIFESTS:
         return True
     return name.startswith("requirements") and name.endswith(".txt")
+
+
+# ---------------------------------------------------------------------------
+# Line change between two revisions
+# ---------------------------------------------------------------------------
+
+
+def line_changed(before: str, after: str, line: int) -> bool:
+    """Whether 1-based ``line`` of ``before`` was replaced or removed in ``after``.
+
+    The "outdated" half of resolve-on-fix on a forge that has no such flag. A
+    line that only moved (an insertion above it) is not changed, and a line
+    outside ``before`` is no evidence either way, so it reads as unchanged.
+    """
+    old_lines = before.split("\n")
+    if line < 1 or line > len(old_lines):
+        return False
+    matcher = SequenceMatcher(None, old_lines, after.split("\n"), autojunk=False)
+    return any(
+        tag in ("replace", "delete") and i1 < line <= i2
+        for tag, i1, i2, _j1, _j2 in matcher.get_opcodes()
+    )
