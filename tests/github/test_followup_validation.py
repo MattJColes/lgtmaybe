@@ -57,6 +57,7 @@ def test_only_explicitly_fixed_thread_ids_are_resolved(monkeypatch) -> None:
     )
 
     gateway.set_validated_fixed_threads({"FIXED"})
+    gateway.mark_reviewed("abc123")
     gateway._resolve_fixed_threads([])
 
     assert resolved == ["FIXED"]
@@ -79,6 +80,7 @@ def test_validated_resolution_reuses_the_active_finding_read(monkeypatch) -> Non
 
     gateway.list_active_findings()
     gateway.set_validated_fixed_threads({"FIXED"})
+    gateway.mark_reviewed("abc123")
     gateway._resolve_fixed_threads([])
 
     assert walks == 1

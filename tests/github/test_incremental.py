@@ -1037,6 +1037,7 @@ def test_incremental_scope_never_resolves_thread_outside_reviewed_paths() -> Non
 
     gateway = _gateway()
     gateway.set_incremental_scope({"src/app.py"})
+    gateway.mark_reviewed("headsha123")
     gateway.post_review([FINDING], "1 finding", diff=SAMPLE_DIFF)
 
     # The in-scope gone finding resolves; the out-of-scope one is untouched.
@@ -1055,7 +1056,9 @@ def test_no_scope_keeps_full_resolve_behaviour() -> None:
     respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
     respx.route(method="PATCH").mock(return_value=httpx.Response(200, json={}))
 
-    _gateway().post_review([FINDING], "1 finding", diff=SAMPLE_DIFF)
+    gateway = _gateway()
+    gateway.mark_reviewed("headsha123")
+    gateway.post_review([FINDING], "1 finding", diff=SAMPLE_DIFF)
 
     assert graphql.resolved == ["T1"]
 
