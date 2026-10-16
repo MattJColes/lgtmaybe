@@ -73,8 +73,8 @@ class StubServer:
         self._httpd.server_close()
 
 
-def start_stub(port: int = 0) -> StubServer:
-    """Start the stub on *port* (0 = any free port) in a daemon thread."""
+def start_stub(port: int = 0, host: str = "127.0.0.1") -> StubServer:
+    """Start the stub on *host*:*port* (0 = any free port) in a daemon thread."""
     calls: list[dict[str, Any]] = []
     lock = threading.Lock()
 
@@ -82,7 +82,7 @@ def start_stub(port: int = 0) -> StubServer:
         _calls = calls
         _lock = lock
 
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    httpd = ThreadingHTTPServer((host, port), Handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     return StubServer(httpd, calls)
 

@@ -70,7 +70,7 @@ The URL is all lgtmaybe needs:
 |---|---|---|
 | `github.com/org/repo/pull/42` | GitHub | `GITHUB_TOKEN` |
 | `gitlab.com/group/sub/project/-/merge_requests/42` | GitLab | `GITLAB_TOKEN` |
-| `gitea.example.com/org/repo/pulls/42` | Gitea | `GITEA_TOKEN` |
+| `gitea.example.com/org/repo/pulls/42` | Gitea (and Forgejo) | `GITEA_TOKEN` |
 | `dev.azure.com/org/project/_git/repo/pullrequest/42` | Azure DevOps | `AZURE_DEVOPS_TOKEN` or `SYSTEM_ACCESSTOKEN` |
 
 lgtmaybe parses the host from the URL rather than assuming it, because
@@ -138,7 +138,9 @@ translates it at its boundary:
 GitHub and Gitea share one entrypoint. Gitea Actions reimplements the GitHub
 Actions runtime, so the same `action` command and container work on both. The
 only variable that differs is `GITHUB_SERVER_URL`, which Gitea points at your
-own instance.
+own instance. Forgejo, a Gitea fork with the same API, also sets
+`FORGEJO_SERVER_URL`, which the entrypoint reads first. A Forgejo pull request
+goes through the Gitea adapter.
 
 GitLab CI has neither an event payload file nor `INPUT_*` variables. So it gets
 its own `gitlab-ci` command, which reads GitLab's predefined `CI_*` variables.

@@ -1,21 +1,21 @@
 ## 1. Spike: Prove the Write Path on Real Forgejo
 
-- [ ] 1.1 Commit `tests/forgejo/uat/compose.yml` (Forgejo plus a registered forgejo-runner with the `docker` label, reused by the user test and task 5.1), bring it up, create a repository and a pull request, and run `python -m lgtmaybe action` in the job container against it with a scoped `GITEA_TOKEN`; verify a review, a summary comment and a commit status post, and record any endpoint that fails in this change's design.md
+- [x] 1.1 Commit `tests/forgejo/uat/compose.yml` (Forgejo plus a registered forgejo-runner with the `docker` label, reused by the user test and task 5.1), bring it up, create a repository and a pull request, and run `python -m lgtmaybe action` in the job container against it with a scoped `GITEA_TOKEN`; verify a review, a summary comment and a commit status post, and record any endpoint that fails in this change's design.md
 - [x] 1.2 Repeat 1.1 with `GITEA_TOKEN: ${{ secrets.FORGEJO_TOKEN }}`; verify whether `GET /user`, the review post and a re-run's dedupe work, and settle design.md's first open question
 
 ## 2. Host Recognition
 
-- [ ] 2.1 Red first: add `tests/cli/test_action.py` cases for `FORGEJO_SERVER_URL` winning over `GITHUB_SERVER_URL`, the `GITHUB_*`-only fallback, and no GHES refusal when `FORGEJO_SERVER_URL` is set; then change `cli._change_url` and verify the cases pass
-- [ ] 2.2 Name Forgejo beside Gitea in `parse_pr_url`'s unparseable-URL error and `GHES_UNSUPPORTED`; verify `tests/core/test_forge.py` asserts the new text
-- [ ] 2.3 Red first: a `tests/gitea/test_gateway.py` case where the permission call returns 403 and the logged warning names the token's missing permission; then reword the warning in `GiteaGateway.has_repo_write` and verify the case passes
-- [ ] 2.4 Add the `gitea.forgejo-host` rule to `openspec/specs/gitea-posting/anchors.yml` (bound to `_change_url`); verify `uv run pytest tests/specs -q`
+- [x] 2.1 Red first: add `tests/cli/test_action.py` cases for `FORGEJO_SERVER_URL` winning over `GITHUB_SERVER_URL`, the `GITHUB_*`-only fallback, and no GHES refusal when `FORGEJO_SERVER_URL` is set; then change `cli._change_url` and verify the cases pass
+- [x] 2.2 Name Forgejo beside Gitea in `parse_pr_url`'s unparseable-URL error and `GHES_UNSUPPORTED`; verify `tests/core/test_forge.py` asserts the new text
+- [x] 2.3 Red first: a `tests/gitea/test_gateway.py` case where the permission call returns 403 and the logged warning names the token's missing permission; then reword the warning in `GiteaGateway.has_repo_write` and verify the case passes
+- [x] 2.4 Add the `gitea.forgejo-host` rule to `openspec/specs/gitea-posting/anchors.yml` (bound to `_change_url`); verify `uv run pytest tests/specs -q`
 
 ## 3. Starter Workflow and Docs
 
-- [ ] 3.1 Red first: add `tests/forgejo/test_example_workflow.py`, mirroring the Gitea test (triggers, no `uses:`, only `python -m lgtmaybe action`, `LGTMAYBE_`-prefixed secret, rejecting `FORGEJO_`, `GITEA_` and `GITHUB_` prefixes, `runs-on: docker`, image major matching the package); then add `examples/forgejo/lgtmaybe.yml` and verify the test passes
-- [ ] 3.2 Bind `gitea.forgejo-workflow` to the example with a YAML rule in `anchors.yml`; verify `uv run pytest tests/specs -q`
-- [ ] 3.3 Write `docs/how-to/review-on-forgejo.md`, marked preview (setup, the Forgejo 11 floor, the runner label, the pip fallback for LXC and host runners, what works and what does not, the security section by link to the Gitea page); add it to `mkdocs.yml`, the README host table and links, `docs/index.md`, `docs/tutorial/getting-started.md` and `ARCHITECTURE.md`; verify `uv run mkdocs build --strict` and `uv run pytest tests/docs -q`
-- [ ] 3.4 Regenerate `docs/llms.txt` and `docs/llms-full.txt` with `uv run python docs/generate_llms_txt.py`; verify `tests/docs/test_llms_txt_fresh.py`
+- [x] 3.1 Red first: add `tests/forgejo/test_example_workflow.py`, mirroring the Gitea test (triggers, no `uses:`, only `python -m lgtmaybe action`, `LGTMAYBE_`-prefixed secret, rejecting `FORGEJO_`, `GITEA_` and `GITHUB_` prefixes, `runs-on: docker`, image major matching the package); then add `examples/forgejo/lgtmaybe.yml` and verify the test passes
+- [x] 3.2 Bind `gitea.forgejo-workflow` to the example with a YAML rule in `anchors.yml`; verify `uv run pytest tests/specs -q`
+- [x] 3.3 Write `docs/how-to/review-on-forgejo.md`, marked preview (setup, the Forgejo 11 floor, the runner label, the pip fallback for LXC and host runners, what works and what does not, the security section by link to the Gitea page); add it to `mkdocs.yml`, the README host table and links, `docs/index.md`, `docs/tutorial/getting-started.md` and `ARCHITECTURE.md`; verify `uv run mkdocs build --strict` and `uv run pytest tests/docs -q`
+- [x] 3.4 Regenerate `docs/llms.txt` and `docs/llms-full.txt` with `uv run python docs/generate_llms_txt.py`; verify `tests/docs/test_llms_txt_fresh.py`
 
 ## 4. Workload Identity Federation
 
