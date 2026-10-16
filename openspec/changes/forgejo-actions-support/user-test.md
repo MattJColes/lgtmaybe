@@ -80,7 +80,11 @@ workflow, and no secret appears in the log.
 As the maintainer, comment `/describe` and then `/ask what does this change
 do?` on the pull request from scenario 1. As the outsider, comment `/review`.
 
-Expect: the maintainer's commands get replies. The outsider's command logs
+Then, as the maintainer, comment `/describe` on the fork pull request from
+scenario 4.
+
+Expect: the maintainer's commands get replies, on the fork pull request too,
+and their runs finish rather than showing as cancelled. The outsider's command logs
 "ignored: no write access", exits successfully, and makes no model call. Check
 the model provider's usage page to confirm the last part.
 

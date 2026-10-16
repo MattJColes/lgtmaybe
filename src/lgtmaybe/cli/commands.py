@@ -718,7 +718,7 @@ def login(service: str) -> None:
 @main.command()
 @click.option(
     "--event-path",
-    envvar="GITHUB_EVENT_PATH",
+    envvar=["GITHUB_EVENT_PATH", "FORGEJO_EVENT_PATH"],
     required=True,
     help="Path to the issue_comment event payload (GitHub sets GITHUB_EVENT_PATH).",
 )
@@ -754,6 +754,16 @@ def _federate_or_fail() -> None:
     os.environ.update(updates)
 
 
+def _actions_env(suffix: str) -> str:
+    """An Actions runtime variable, under its ``GITHUB_`` name or Forgejo's own.
+
+    forgejo-runner sets ``FORGEJO_*`` beside the ``GITHUB_*`` aliases from v7,
+    and only the aliases before that, so reading either keeps the entrypoint
+    off any one runner's naming. Gitea and GitHub set ``GITHUB_*``.
+    """
+    return os.environ.get(f"GITHUB_{suffix}") or os.environ.get(f"FORGEJO_{suffix}") or ""
+
+
 @main.command()
 def action() -> None:
     """GitHub Action entrypoint: route by event, read inputs from env.
@@ -761,7 +771,7 @@ def action() -> None:
     ``issue_comment`` routes a slash command, stale review-comment events are a
     no-op, and pull-request events run a review of the triggering PR.
     """
-    event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+    event_name = _actions_env("EVENT_NAME")
     if event_name == "pull_request_review_comment":
         return
 
@@ -781,7 +791,13 @@ def action() -> None:
         profile=bool(_parse_bool(inputs["profile"])),
     )
 
-    event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
+    event_path = _actions_env("EVENT_PATH")
+    if not event_path:
+        raise click.ClickException(
+            "Neither GITHUB_EVENT_PATH nor FORGEJO_EVENT_PATH is set: run `lgtmaybe action` "
+            "inside a GitHub, Gitea or Forgejo Actions job."
+        )
+    event = json.loads(Path(event_path).read_text(encoding="utf-8"))
     if event_name == "issue_comment":
         execute_comment(event, cfg, runtime)
         return

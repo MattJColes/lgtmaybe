@@ -15,6 +15,16 @@ investigation:
   `pull_request_target`. With the automatic job token: reviews post as
   `forgejo-actions` and re-runs de-duplicate, but the collaborator-permission
   call returns 403, so every slash command is ignored (fail closed).
+- A follow-up check on Forgejo 17 with runner v12: every `GITHUB_*` variable
+  arrives with a `FORGEJO_*` twin of the same value, so the entrypoint reads
+  either name for the event too. A fork's `pull_request` run waits for a
+  maintainer's approval and gets no secrets; `pull_request_target` and an
+  `issue_comment` on a fork's pull request both get the secrets at once. A
+  comment posted with a personal token starts a workflow run, which shared the
+  slash command's concurrency group and cancelled it until the examples gave
+  non-command comments their own group. No Forgejo from 11 to 17 has a REST
+  route to resolve a review conversation (the web route needs a browser
+  session), so resolve-on-fix stays unclaimed, with a contract test watching.
 - Forgejo refuses secret names starting with `FORGEJO_`, as well as `GITEA_`
   and `GITHUB_` (HTTP 400).
 - forgejo-runner v7 and later sets each `FORGEJO_*` variable and its `GITHUB_*`

@@ -11,6 +11,7 @@ import httpx
 import pytest
 
 from lgtmaybe.core.models import ReviewFinding
+from lgtmaybe.core.ports import SupportsThreadResolution
 from lgtmaybe.gitea import GiteaGateway
 
 from .conftest import LOOP_LINE, Forgejo, PullRequest
@@ -139,3 +140,29 @@ def test_a_conversation_comment_posts_and_lists(
     gateway.post_issue_comment("hello from the contract test")
 
     assert (forgejo.owner, "hello from the contract test") in gateway.list_conversation_comments()
+
+
+def test_forgejo_still_has_no_api_to_resolve_review_threads(forgejo: Forgejo) -> None:
+    """Resolve-on-fix stays unclaimed on Forgejo because the API cannot serve it.
+
+    Forgejo resolves a review conversation only through a web route that needs
+    a browser session (an API token is redirected to sign in), and no REST
+    route exists in Forgejo 11 to 17. When this fails, a release has added one:
+    probe for it then, and claim thread resolution only where it answers.
+    """
+    resp = forgejo.admin.get(f"{forgejo.url}/swagger.v1.json")
+    resp.raise_for_status()
+    spec = resp.json()
+
+    routes = [
+        f"{method.upper()} {path}"
+        for path, operations in spec["paths"].items()
+        for method, operation in operations.items()
+        if any(
+            word
+            in f"{path} {operation.get('operationId', '')} {operation.get('summary', '')}".lower()
+            for word in ("resolve", "conversation")
+        )
+    ]
+    assert routes == [], f"Forgejo {spec['info']['version']} now exposes {routes}"
+    assert not isinstance(_gateway(forgejo, PullRequest(1, "")), SupportsThreadResolution)
