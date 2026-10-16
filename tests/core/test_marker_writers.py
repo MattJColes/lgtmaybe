@@ -139,8 +139,112 @@ def _docstring_nodes(tree: ast.Module) -> set[int]:
     return ids
 
 
-# A marker family's prefix, e.g. ``lgtmaybe-reviewed:``.
-_FAMILY = re.compile(r"lgtmaybe-[a-z-]+:")
+_FAMILY_NAME = re.compile(r"lgtmaybe-[a-z]+(?:-[a-z]+)*")
+
+
+def _marker_families() -> set[str]:
+    """Every hidden-marker family name, read from where the markers are defined.
+
+    ``core.comment`` holds the comment markers' readers and writers, and every
+    ``lgtmaybe-`` name in it is a marker family. The engine and CLI gates are
+    taken from their marker constants rather than their module text, which also
+    names worker threads ``lgtmaybe-…``.
+    """
+    from lgtmaybe.cli import SKIPPED_MARKER
+    from lgtmaybe.core.models import RiskAssessment
+    from lgtmaybe.engine.engine import INCOMPLETE_MARKER, LENSES_MARKER_PREFIX
+    from lgtmaybe.engine.risk import risk_marker
+
+    text = (Path(lgtmaybe.__file__).parent / "core" / "comment.py").read_text(encoding="utf-8")
+    gates = [
+        INCOMPLETE_MARKER,
+        LENSES_MARKER_PREFIX,
+        SKIPPED_MARKER,
+        risk_marker(RiskAssessment(level="high")),
+    ]
+    return set(_FAMILY_NAME.findall("\n".join([text, *gates])))
+
+
+def test_marker_families_are_derived() -> None:
+    expected = {
+        f"lgtmaybe-{family}"
+        for family in (
+            "reviewed",
+            "diagrammed",
+            "diff",
+            "diagram",
+            "describe",
+            "finding",
+            "identity",
+            "resolved-fingerprint",
+            "resolved-identity",
+            "risk",
+            "lenses",
+            "incomplete",
+            "skipped",
+        )
+    }
+
+    assert _marker_families() == expected
+
+
+# A marker family named anywhere in a constant, with or without the ``:`` its
+# value follows, so a prefix completed at run time is caught too. Exact names
+# only (no longer word after one), so a non-marker name such as the base
+# checkout's ``lgtmaybe-base-`` temp-dir prefix is not.
+_FAMILY = re.compile(
+    "(?:"
+    + "|".join(sorted(map(re.escape, _marker_families()), key=len, reverse=True))
+    + r")(?![a-z-])"
+)
+
+
+def _hand_built_markers(source: str) -> list[str]:
+    """String constants in *source* that build a hidden marker by hand.
+
+    Docstrings may describe a marker; code may not build one, f-string parts
+    included, because a hand-built marker is the drift this file guards. A
+    constant counts when it opens a comment naming lgtmaybe, or names a marker
+    family (``lgtmaybe-<family>``) anywhere in it.
+    """
+    tree = ast.parse(source)
+    docstrings = _docstring_nodes(tree)
+    return [
+        f"line {node.lineno}: {node.value!r}"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and id(node) not in docstrings
+        and (("<!--" in node.value and "lgtmaybe" in node.value) or _FAMILY.search(node.value))
+    ]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'body += f"\\n<!-- lgtmaybe-reviewed:{sha} -->"\n',
+        'prefix = "lgtmaybe-reviewed"\nstamp = prefix + ":" + sha\n',
+        'old = "lgtmaybe-resolved-identity:"\n',
+        'family = "lgtmaybe-describe"\n',
+        'summary = "<!-- lgtmaybe -->"\n',
+    ],
+)
+def test_a_hand_built_marker_is_flagged(source: str) -> None:
+    assert _hand_built_markers(source)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'def stamp():\n    """Appends ``<!-- lgtmaybe-reviewed:<sha> -->`` via core."""\n',
+        '"""Module docstring naming lgtmaybe-diff markers."""\nx = 1\n',
+        'body += f"\\n{reviewed_marker(sha)}"\n',
+        'dest = mkdtemp(prefix="lgtmaybe-base-")\n',
+        'family = "lgtmaybe-diagrammer"\n',
+    ],
+)
+def test_clean_code_is_not_flagged(source: str) -> None:
+    assert _hand_built_markers(source) == []
 
 
 def _gateway_sources() -> list[Path]:
@@ -154,22 +258,7 @@ def test_gateway_sources_are_found() -> None:
 
 @pytest.mark.parametrize("path", _gateway_sources(), ids=lambda p: f"{p.parent.name}/{p.name}")
 def test_no_gateway_spells_out_a_hidden_marker(path: Path) -> None:
-    """Gateways stamp markers through the ``core.comment`` writers only.
-
-    Docstrings may describe a marker; code may not build one, f-string parts
-    included, because a hand-built marker is the drift this file guards. A
-    constant counts when it opens a comment naming lgtmaybe, or names a marker
-    family (``lgtmaybe-<family>:``) on its own, as an f-string part would.
-    """
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    docstrings = _docstring_nodes(tree)
-    offenders = [
-        f"line {node.lineno}: {node.value!r}"
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Constant)
-        and isinstance(node.value, str)
-        and id(node) not in docstrings
-        and (("<!--" in node.value and "lgtmaybe" in node.value) or _FAMILY.search(node.value))
-    ]
+    """Gateways stamp markers through the ``core.comment`` writers only."""
+    offenders = _hand_built_markers(path.read_text(encoding="utf-8"))
 
     assert not offenders, f"{path.name} builds a hidden marker by hand: {offenders}"

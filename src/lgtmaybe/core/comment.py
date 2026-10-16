@@ -137,6 +137,8 @@ def marker(family: str, key: str | None) -> str:
 # The change-overview comment's marker family, shared by every gateway's upsert
 # and the existing-overview check so the two can never drift apart.
 DIAGRAM_MARKER_FAMILY = "lgtmaybe-diagram"
+# The structured-description comment's marker family, shared the same way.
+DESCRIBE_MARKER_FAMILY = "lgtmaybe-describe"
 
 # Completion watermarks driving incremental review, shared by every adapter that
 # offers it so the wire format cannot drift between forges. The review summary

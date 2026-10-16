@@ -47,6 +47,7 @@ from urllib.parse import quote
 import httpx
 
 from lgtmaybe.core.comment import (
+    DESCRIBE_MARKER_FAMILY,
     DIAGRAM_MARKER_FAMILY,
     current_finding_keys,
     finding_keys,
@@ -218,7 +219,7 @@ class AzureDevOpsGateway:
         self._headers = {"Authorization": authorization, "Accept": "application/json"}
         self._client = client if client is not None else httpx.Client(timeout=_TIMEOUT)
         self._marker = marker("lgtmaybe", marker_key)
-        self._describe_marker = marker("lgtmaybe-describe", marker_key)
+        self._describe_marker = marker(DESCRIBE_MARKER_FAMILY, marker_key)
         self._diagram_marker = marker(DIAGRAM_MARKER_FAMILY, marker_key)
         self._head_sha: str | None = None
         self._diff: str | None = None
