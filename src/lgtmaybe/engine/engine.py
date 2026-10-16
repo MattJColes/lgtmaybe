@@ -655,6 +655,9 @@ def _spec_lens() -> _Lens:
 
 # One prepared _review_lens call, ready to submit to the fan-out pool.
 _LensOutcome = tuple[list[ReviewFinding], str | None]
+# Builds the (intent, hint, directory, spec) blocks for one set of file paths:
+# a batch's own set, or the subset a split piece shows.
+_BlocksFor = Callable[[set[str]], tuple[str | None, str | None, str | None, str | None]]
 _ReviewTask = partial[_LensOutcome]
 
 
@@ -1356,6 +1359,25 @@ class LLMReviewEngine:
             else None
         )
         per_batch: list[tuple[bool, list[_PreparedCall]]] = []
+
+        # Blocks for any SUBSET of a batch's files. A split piece shows a
+        # subset, so the batch's own intent, spec, hint and directory blocks
+        # are wrong for it twice over: their not-visible lists omit the
+        # sibling-piece files, and their hints and rules cover files the piece
+        # cannot see. One builder serves the batch and each piece, so the two
+        # can never drift.
+        def blocks_for(paths: set[str]) -> tuple[str | None, str | None, str | None, str | None]:
+            not_visible = files_not_visible(ctx.changed_files, paths)
+            hints = [h for h in sa_hints if h.path in paths]
+            return (
+                wrap_intent(clean_intent, not_visible) if clean_intent is not None else None,
+                wrap_hints(redact(format_hints(hints))) if hints else None,
+                build_directory_block(rules_for(paths, cfg), dir_contents)
+                if cfg.directory_rules
+                else None,
+                wrap_spec(clean_spec, not_visible) if clean_spec is not None else None,
+            )
+
         for batch_num, batch in enumerate(batches, start=1):
             batch_diff = "\n".join(patch for _, patch in batch)
             wrapped = wrap_diff(batch_diff)
@@ -1364,8 +1386,7 @@ class LLMReviewEngine:
             # diff) and wrapped as their own neutralised untrusted block.
             batch_paths = {path for path, _ in batch}
             not_visible = files_not_visible(ctx.changed_files, batch_paths)
-            batch_hints = [h for h in sa_hints if h.path in batch_paths]
-            hint_block = wrap_hints(redact(format_hints(batch_hints))) if batch_hints else None
+            intent_block, hint_block, dir_block, spec_block = blocks_for(batch_paths)
             # What this call was NOT shown, for EVERY lens — not just the two that
             # judge a whole-PR promise. Absence stated as fact beats absence
             # inferred from "code you rely on may live in files you CANNOT see",
@@ -1373,24 +1394,6 @@ class LLMReviewEngine:
             # when the batch shows the whole PR, so the common case adds nothing
             # to the cached prefix.
             hidden_block = wrap_not_shown(not_visible)
-            # Directory rules matching THIS batch's files, with the context
-            # files they name. Batch-scoped like the hints above, so a batch
-            # never pays for another directory's instructions.
-            dir_block = (
-                build_directory_block(rules_for(batch_paths, cfg), dir_contents)
-                if cfg.directory_rules
-                else None
-            )
-            # The intent block is built PER BATCH, not once, because it has to
-            # name the files this particular call cannot see.
-            intent_block = (
-                wrap_intent(clean_intent, not_visible) if clean_intent is not None else None
-            )
-            # Same for the spec block, and the correction matters more here: a
-            # requirement is delivered by CODE, so a spec call that does not know
-            # which files it was denied reports every requirement implemented in
-            # another batch as undelivered.
-            spec_block = wrap_spec(clean_spec, not_visible) if clean_spec is not None else None
             # Warm the prompt cache for this batch: a fully concurrent first
             # wave defeats it (every call misses, and on explicit-breakpoint
             # routes each also pays the cache write), so one lens is dispatched
@@ -1417,6 +1420,7 @@ class LLMReviewEngine:
                         batch,
                         spec_block=spec_block,
                         hidden_block=hidden_block,
+                        blocks_for=blocks_for,
                     ),
                 )
                 for lens in lenses
@@ -1818,6 +1822,7 @@ class LLMReviewEngine:
         *,
         spec_block: str | None = None,
         hidden_block: str | None = None,
+        blocks_for: _BlocksFor | None = None,
     ) -> tuple[list[ReviewFinding], str | None]:
         """Run one focused review call for a single lens (built-in or user-defined).
 
@@ -1830,7 +1835,8 @@ class LLMReviewEngine:
         this call into the one retry an oversized payload can actually benefit
         from: the payload is split and the pieces reviewed (see
         :meth:`_review_split`). None means "already a piece" — no further
-        splitting.
+        splitting. ``blocks_for`` rebuilds the per-batch blocks for each piece's
+        own file set; None means there is nothing smaller to rebuild for.
 
         Every call uses the shared system preamble, then the shared prefix
         (hints + diff) as one user message, then the lens block (intent +
@@ -1860,6 +1866,7 @@ class LLMReviewEngine:
                 lens=lens,
                 spec_block=spec_block,
                 hidden_block=hidden_block,
+                blocks_for=blocks_for,
             )
         )
         on_needs = (
@@ -2099,6 +2106,7 @@ class LLMReviewEngine:
         lens: _Lens,
         spec_block: str | None = None,
         hidden_block: str | None = None,
+        blocks_for: _BlocksFor | None = None,
         slice_hunks: bool = False,
     ) -> _LensOutcome:
         """Re-review an oversized batch as smaller pieces, one call each.
@@ -2143,19 +2151,25 @@ class LLMReviewEngine:
         def review_piece(piece: list[tuple[str, str]]) -> _LensOutcome:
             # Recomputed, never inherited: this piece carries a subset of the
             # batch's files, so the batch's manifest would omit exactly the
-            # sibling-piece files this call is now missing.
-            piece_hidden = wrap_not_shown(
-                files_not_visible(run.changed_files, {path for path, _ in piece})
+            # sibling-piece files this call is now missing — and so would its
+            # intent, spec, hint and directory blocks, which additionally
+            # carry hints and rules for files the piece cannot see.
+            piece_paths = {path for path, _ in piece}
+            piece_hidden = wrap_not_shown(files_not_visible(run.changed_files, piece_paths))
+            piece_intent, piece_hint, piece_dir, piece_spec = (
+                blocks_for(piece_paths)
+                if blocks_for is not None
+                else (intent_block, hint_block, dir_block, spec_block)
             )
             return self._review_lens(
                 run,
                 wrap_diff("\n".join(patch for _, patch in piece)),
-                intent_block,
-                hint_block,
-                dir_block,
+                piece_intent,
+                piece_hint,
+                piece_dir,
                 batch_num,
                 lens,
-                spec_block=spec_block,
+                spec_block=piece_spec,
                 hidden_block=piece_hidden,
             )
 
