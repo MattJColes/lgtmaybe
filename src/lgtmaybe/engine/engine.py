@@ -528,10 +528,10 @@ def _build_lenses(cfg: ReviewConfig, *, has_intent: bool, has_spec: bool = False
     preset, not of how many workers happen to be available: a single-worker
     provider runs the same five calls, serially. This grouping applies only
     when ``categories`` is the untouched default: a user who explicitly listed
-    lenses asked for exactly those, so the preset never regroups them. The full preset runs every
-    category; an explicit list runs exactly its selected categories. Both skip
-    intent when nothing states an intent, and skip spec when no committed
-    specification matches the PR.
+    lenses asked for exactly those, so the preset never regroups them. The full
+    preset runs every category; an explicit list runs exactly its selected
+    categories. Both skip intent when nothing states an intent, and skip spec
+    when no committed specification matches the PR.
 
     Spec is the one built-in that does not fold into a fast-preset group. It
     carries a large block of its own (requirements, design, task list) and under

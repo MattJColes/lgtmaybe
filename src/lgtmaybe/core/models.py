@@ -1155,8 +1155,9 @@ class ReviewConfig(_Strict):
     resolve_fixed: bool = True
     # Call-count preset (see ReviewPreset): `fast` (default) covers all ten
     # everyday categories in five calls, one per concern — security,
-    # correctness, code health, artefacts, architecture — the same five on every provider;
-    # `full` runs one call per lens. An explicit `categories` list overrides it.
+    # correctness, code health, artefacts, architecture — the same five on
+    # every provider; `full` runs one call per lens. An explicit `categories`
+    # list overrides it.
     preset: ReviewPreset = ReviewPreset.fast
     # Review lenses to run. Each is asked in its own concurrent LLM call and the
     # findings are merged + deduped. Defaults to all of them (grouped per the
