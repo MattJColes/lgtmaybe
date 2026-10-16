@@ -407,9 +407,11 @@ class RestGitHubGateway:
         at = numbers.index(self._pr_number)
         below = numbers[:at][-_MAX_STACK_LAYERS:]
         above = numbers[at + 1 :][:_MAX_STACK_LAYERS]
+        # Position and size from the listing, not the payload: the block names the
+        # listing's layers, and the payload can still count ones no longer open.
         return PRStack(
-            position=int(native["position"]),
-            size=int(native["size"]),
+            position=at + 1,
+            size=len(numbers),
             base_ref=str(native["base"]["ref"]),
             below=[self._stack_layer(number) for number in below],
             above=[self._stack_layer(number) for number in above],
@@ -419,8 +421,11 @@ class RestGitHubGateway:
         """The chain of open PRs this one is based on, and those based on it.
 
         Same-repository only: a fork's branch names say nothing about this
-        repository's branches. A step with no single match ends that side of the
-        walk, as does a branch already seen or the layer cap.
+        repository's branches. A side ends naturally at the default branch or a
+        step with no match (a branch no PR heads, a last layer). An ambiguous
+        step, a branch already seen or the layer cap also end it, but leave the
+        stack ``complete=False``: its position, size and base are then guesses,
+        and the engine does not present them as facts.
         """
         head = meta.get("head") or {}
         if (head.get("repo") or {}).get("full_name") != self._repo:
@@ -431,26 +436,35 @@ class RestGitHubGateway:
         owner = quote(self._repo.split("/", 1)[0], safe="")
         seen = {head_ref}
         below: list[StackLayer] = []
-        while ref != default and ref not in seen and len(below) < _MAX_STACK_LAYERS:
+        complete = True
+        while ref != default:
+            if ref in seen or len(below) == _MAX_STACK_LAYERS:
+                complete = False
+                break
             parents = self._get_json(
                 f"{self._api}/pulls?state=open&head={owner}:{quote(ref, safe='')}&per_page=2"
             )
             if len(parents) != 1:
+                complete = complete and not parents
                 break
             seen.add(ref)
             below.insert(0, self._stack_layer(int(parents[0]["number"]), parents[0].get("title")))
             ref = str(parents[0]["base"]["ref"])
         above: list[StackLayer] = []
         tip = head_ref
-        while len(above) < _MAX_STACK_LAYERS:
+        while True:
             children = self._get_json(
                 f"{self._api}/pulls?state=open&base={quote(tip, safe='')}&per_page=2"
             )
             if len(children) != 1:
+                complete = complete and not children
                 break
             child_head = children[0]["head"]
             tip = str(child_head["ref"])
-            if (child_head.get("repo") or {}).get("full_name") != self._repo or tip in seen:
+            if (child_head.get("repo") or {}).get("full_name") != self._repo:
+                break  # a fork's PR is not a layer: this side ends here
+            if tip in seen or len(above) == _MAX_STACK_LAYERS:
+                complete = False
                 break
             seen.add(tip)
             above.append(self._stack_layer(int(children[0]["number"]), children[0].get("title")))
@@ -462,6 +476,7 @@ class RestGitHubGateway:
             base_ref=ref,
             below=below,
             above=above,
+            complete=complete,
         )
 
     def _stack_layer(self, number: int, title: str | None = None) -> StackLayer:

@@ -410,6 +410,20 @@ def test_auto_diagram_on_pr_change_events_when_enabled() -> None:
     assert should_auto_diagram(make_cfg(auto_diagram=False), event_action="reopened") is False
 
 
+def test_an_edit_refreshes_the_overview_only_as_a_retarget() -> None:
+    """The retarget rule travels with the gate, not with each caller: an
+    ``edited`` that is not a retarget (a title change) never refreshes it."""
+    from lgtmaybe.cli import should_auto_diagram
+
+    on = make_cfg(auto_diagram=True)
+    assert should_auto_diagram(on, event_action="edited") is False
+    assert should_auto_diagram(on, event_action="edited", retargeted=True) is True
+    assert (
+        should_auto_diagram(make_cfg(auto_diagram=False), event_action="edited", retargeted=True)
+        is False
+    )
+
+
 def test_run_diagram_posts_via_the_idempotent_upsert() -> None:
     import json as _json
 

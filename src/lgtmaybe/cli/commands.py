@@ -750,20 +750,28 @@ def action() -> None:
         return
 
     event_action = pr_event_action(event)
-    if event_action == "edited" and not base_changed(event):
+    retargeted = event_action == "edited" and base_changed(event)
+    if event_action == "edited" and not retargeted:
         # Workflows listen for `edited` to catch a retarget; a title or
         # description edit changes no code, so it costs no review.
         click.echo("Pull request edited, but its base branch did not change: nothing to review.")
         return
     # incremental=None (auto): review only the new commits on a synchronize
-    # push, do a full review on open/reopen and on a retarget (same head, new
-    # diff). Explicit config/input wins.
+    # push, do a full review on open/reopen. Explicit config/input wins, except
+    # on a retarget: the head is unchanged, so an incremental run would stop as
+    # "already complete" over a diff nobody reviewed.
+    if retargeted:
+        cfg = cfg.model_copy(update={"incremental": False})
     cfg = resolve_auto_incremental(cfg, event_action=event_action)
     runtime = replace(runtime, pr_url=pr_url_from_event(event))
     # The change overview refreshes on a synchronize push too, so a replacement
     # run cannot lose it. It posts after the review, and execute_review shares
     # one gateway and one PR-context fetch across the two.
-    execute_review(cfg, runtime, diagram=should_auto_diagram(cfg, event_action=event_action))
+    execute_review(
+        cfg,
+        runtime,
+        diagram=should_auto_diagram(cfg, event_action=event_action, retargeted=retargeted),
+    )
 
 
 @main.command("gitlab-ci")

@@ -3805,11 +3805,47 @@ def test_a_pr_outside_a_stack_sends_exactly_what_it_sent_before() -> None:
 def test_the_other_layers_titles_are_redacted() -> None:
     provider = _provider_for([], reflection_keeps_all=True)
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+    path_key = "ghp_" + "a" * 36
     leaky = _STACK.model_copy(
-        update={"below": [StackLayer(number=10, title="Use AKIAIOSFODNN7EXAMPLE", files=[])]}
+        update={
+            "below": [
+                StackLayer(
+                    number=10, title="Use AKIAIOSFODNN7EXAMPLE", files=[f"keys/{path_key}.txt"]
+                )
+            ]
+        }
     )
 
     LLMReviewEngine(provider).review(_TWO_FILE_CTX.model_copy(update={"stack": leaky}), cfg)
 
     for prefix in _review_prefixes(provider):
         assert "AKIAIOSFODNN7EXAMPLE" not in prefix
+        assert path_key not in prefix
+
+
+def test_a_summary_template_can_name_the_stack_layer() -> None:
+    provider = _provider_for([], reflection_keeps_all=True)
+    cfg = ReviewConfig(
+        provider=Provider.ollama, model="llama3", summary_template="{count} found · {stack}"
+    )
+
+    _findings, summary = LLMReviewEngine(provider).review(
+        _TWO_FILE_CTX.model_copy(update={"stack": _STACK}), cfg
+    )
+
+    assert "\n0 found · layer 2 of 3 in a stack\n" in summary
+
+
+def test_a_stack_whose_ends_were_not_found_claims_no_position() -> None:
+    """A chain walk cut short (the layer cap, an ambiguous step) knows only a
+    lower bound: the summary must not present a guessed position as fact."""
+    provider = _provider_for([], reflection_keeps_all=True)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+    partial = _STACK.model_copy(update={"complete": False})
+
+    _findings, summary = LLMReviewEngine(provider).review(
+        _TWO_FILE_CTX.model_copy(update={"stack": partial}), cfg
+    )
+
+    assert "in a stack of at least 3" in summary
+    assert "layer 2 of 3" not in summary

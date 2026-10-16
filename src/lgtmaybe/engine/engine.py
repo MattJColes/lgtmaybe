@@ -2920,6 +2920,7 @@ def _summary_line(
     """
     version = package_version()
     segment = risk_segment(risk) if risk is not None else ""
+    stack_segment = _stack_segment(stack)
     temperature = _TEMPERATURE_SEGMENT if temperature_dropped else ""
     if cfg.summary_template:
         try:
@@ -2929,6 +2930,7 @@ def _summary_line(
                 model=cfg.model,
                 version=version,
                 risk=segment,
+                stack=stack_segment,
                 temperature=temperature,
             )
         except (KeyError, IndexError, ValueError) as exc:
@@ -2938,12 +2940,21 @@ def _summary_line(
             )
     plural = _plural(count)
     risk_part = f" · {segment}" if segment else ""
-    stack_part = f" · layer {stack.position} of {stack.size} in a stack" if stack else ""
+    stack_part = f" · {stack_segment}" if stack_segment else ""
     temperature_part = f" · {temperature}" if temperature else ""
     return (
         f"{count} finding{plural}{risk_part}{stack_part} · provider {cfg.provider} · "
         f"model {cfg.model}{temperature_part} · lgtmaybe {version}"
     )
+
+
+def _stack_segment(stack: PRStack | None) -> str:
+    """The summary's stack segment: an exact position only when both ends were found."""
+    if stack is None:
+        return ""
+    if stack.complete:
+        return f"layer {stack.position} of {stack.size} in a stack"
+    return f"in a stack of at least {stack.size}"
 
 
 def _redacted_stack(stack: PRStack | None) -> PRStack | None:

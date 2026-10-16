@@ -1299,6 +1299,11 @@ one's head, and repeats upwards. A step with more than one match ends the walk
 on that side. Only branches in the same repository count, so a pull request from
 a fork is never walked.
 
+When the walk stops early, at the eight-layer cap, an ambiguous step or a branch
+it has already seen, lgtmaybe cannot know the layer's exact position. It then
+tells the model, and the summary, only that the stack has at least that many
+pull requests.
+
 The lookup is best effort. If it fails, the review runs without stack context
 and the failure is logged.
 
@@ -4518,6 +4523,9 @@ A custom template for the review summary line. Placeholders:
 - `{model}`
 - `{version}`: the lgtmaybe release that produced the review
 - `{risk}`: the risk segment, empty when `risk` is off
+- `{stack}`: the pull request's layer in a
+  [stack](review-stacked-pull-requests.md), such as `layer 2 of 3 in a stack`;
+  empty outside a stack
 - `{temperature}`: `temperature not sent` when the model's route dropped the
   configured temperature, so the review may not be reproducible; empty
   otherwise
@@ -8339,6 +8347,11 @@ The canonical machine-readable schemas. These are the source of truth for provid
           },
           "title": "Below",
           "type": "array"
+        },
+        "complete": {
+          "default": true,
+          "title": "Complete",
+          "type": "boolean"
         },
         "position": {
           "minimum": 1,

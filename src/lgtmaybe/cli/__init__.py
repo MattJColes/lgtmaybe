@@ -137,16 +137,18 @@ def base_changed(event: dict[str, Any]) -> bool:
     return isinstance(changes, dict) and "base" in changes
 
 
-def should_auto_diagram(cfg: ReviewConfig, *, event_action: str) -> bool:
+def should_auto_diagram(cfg: ReviewConfig, *, event_action: str, retargeted: bool = False) -> bool:
     """Whether the action run should post or refresh the change overview.
 
     The overview's own sections (description, High Impact Areas) are config
     toggles inside it, not separate events: they ride this one comment, so a
-    push refreshes all of them together or none of them. ``edited`` reaches
-    here only as a retarget (see :func:`base_changed`), which changes the diff
-    the overview describes.
+    push refreshes all of them together or none of them. A retarget (see
+    :func:`base_changed`) changes the diff the overview describes, so it
+    refreshes too; any other ``edited`` does not.
     """
-    return cfg.auto_diagram and event_action in ("opened", "reopened", "synchronize", "edited")
+    return cfg.auto_diagram and (
+        event_action in ("opened", "reopened", "synchronize") or retargeted
+    )
 
 
 def existing_overview_note(github: ReviewGateway, ctx: PRContext, cfg: ReviewConfig) -> str | None:

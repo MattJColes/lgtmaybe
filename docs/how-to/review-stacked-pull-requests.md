@@ -69,6 +69,11 @@ one's head, and repeats upwards. A step with more than one match ends the walk
 on that side. Only branches in the same repository count, so a pull request from
 a fork is never walked.
 
+When the walk stops early, at the eight-layer cap, an ambiguous step or a branch
+it has already seen, lgtmaybe cannot know the layer's exact position. It then
+tells the model, and the summary, only that the stack has at least that many
+pull requests.
+
 The lookup is best effort. If it fails, the review runs without stack context
 and the failure is logged.
 

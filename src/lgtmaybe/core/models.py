@@ -841,6 +841,11 @@ class PRStack(_Strict):
     base_ref: str
     below: list[StackLayer] = Field(default_factory=list)
     above: list[StackLayer] = Field(default_factory=list)
+    # False when the stack's ends were not found (a chain walk cut short by the
+    # layer cap, an ambiguous step or a cycle): ``position`` and ``size`` are
+    # then lower bounds and ``base_ref`` is only where the walk stopped, so they
+    # are never presented to the model as facts.
+    complete: bool = True
 
 
 class PRContext(_Strict):
@@ -1088,9 +1093,10 @@ class ReviewConfig(_Strict):
     spec_paths: list[str] = Field(default_factory=list)
     # Custom template for the review summary line. Placeholders: {count}
     # (findings posted), {provider}, {model}, {version} (the running lgtmaybe
-    # release), {risk} (the risk-of-change segment) and {temperature} ("temperature
-    # not sent" when the route dropped the configured temperature); the last two
-    # are empty when there is nothing to say. None (default) keeps the built-in
+    # release), {risk} (the risk-of-change segment), {stack} (the PR's layer in a
+    # stack of pull requests) and {temperature} ("temperature not sent" when the
+    # route dropped the configured temperature); the last three are empty when
+    # there is nothing to say. None (default) keeps the built-in
     # line, which names all of them; a template that fails to format falls back
     # to it too.
     summary_template: str | None = None

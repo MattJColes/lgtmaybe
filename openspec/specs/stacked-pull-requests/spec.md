@@ -27,6 +27,8 @@ layers each side; any failure leaves it None and the review continues.
   this one by base and head branch
 - **THEN** the walk finds them, stopping at the default branch, an ambiguous
   step, a branch already seen or the layer cap
+- **AND** a walk that stopped at anything but a natural end (the default
+  branch, or a step with no match) marks the stack incomplete
 
 #### Scenario: a fork or a failed lookup
 - **WHEN** the head branch lives in a fork, or a stack lookup fails
@@ -36,8 +38,8 @@ layers each side; any failure leaves it None and the review continues.
 
 The engine SHALL put a redacted, neutralised STACK block naming the layer's
 position and the other layers on the shared prefix of every review call, and
-SHALL name the layer in the summary line; a pull request outside a stack MUST
-send exactly the prompt it sent before.
+SHALL name the layer in the summary line (exact only for a complete stack, else
+a lower bound); a pull request outside a stack MUST send its old prompt.
 <!-- anchor: stack.prompt-block -->
 
 #### Scenario: a hostile layer title
@@ -69,10 +71,10 @@ stamped with that completed head.
 
 ### Requirement: A retargeted pull request is reviewed in full
 
-The action SHALL review a pull request in full, and refresh its overview, on an
-`edited` event whose `changes` include `base`, and SHALL review nothing on any
-other `edited` event; the supplied workflows MUST subscribe to `edited` without
-letting such an edit cancel a running review.
+The action SHALL review a pull request in full, whatever `incremental` says, and
+refresh its overview, on an `edited` event whose `changes` include `base`, and
+SHALL review nothing on any other `edited` event; the supplied workflows MUST
+subscribe to `edited` without letting such an edit cancel a running review.
 <!-- anchor: stack.retarget -->
 
 #### Scenario: a parent merges under a branch-chained stack

@@ -504,3 +504,13 @@ class TestWrapStack:
         assert "src/f9.py" in block
         assert "src/f10.py" not in block
         assert "and 20 more" in block
+
+    def test_an_incomplete_stack_states_only_a_lower_bound(self) -> None:
+        from lgtmaybe.engine.injection import wrap_stack
+
+        block = wrap_stack(_stack(complete=False))
+
+        assert block is not None
+        assert "at least 3" in block
+        assert "layer 2 of 3" not in block
+        assert "`main`" not in block  # where the walk stopped is not the stack's base

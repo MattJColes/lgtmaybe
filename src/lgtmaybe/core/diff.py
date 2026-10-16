@@ -38,6 +38,11 @@ from lgtmaybe.core.diffparse import walk_diff
 # function git names) is kept: it is part of what a reviewer reads.
 _HUNK_RANGES = re.compile(r"^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@")
 
+# Hex characters a fingerprint keeps. The marker that stamps one
+# (`core.comment.REVIEWED_DIFF_MARKER`) is built from this, so the two cannot
+# drift into a marker that never matches.
+DIFF_FINGERPRINT_LENGTH = 16
+
 
 def diff_fingerprint(diff: str) -> str:
     """A short hash of a unified diff that survives a rebase of the same edits.
@@ -52,7 +57,7 @@ def diff_fingerprint(diff: str) -> str:
     kept = [
         _HUNK_RANGES.sub("@@", line) for line in diff.split("\n") if not line.startswith("index ")
     ]
-    return hashlib.sha256("\n".join(kept).encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha256("\n".join(kept).encode("utf-8")).hexdigest()[:DIFF_FINGERPRINT_LENGTH]
 
 
 # ---------------------------------------------------------------------------

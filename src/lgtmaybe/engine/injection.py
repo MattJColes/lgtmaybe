@@ -287,11 +287,15 @@ def wrap_stack(stack: PRStack | None) -> str | None:
     """
     if stack is None:
         return None
+    where = (
+        f"This PR is layer {stack.position} of {stack.size} in a stack based on `{stack.base_ref}`."
+        if stack.complete
+        else f"This PR is one layer of a stack of at least {stack.size} pull requests."
+    )
     lines = [
-        f"This PR is layer {stack.position} of {stack.size} in a stack based on "
-        f"`{stack.base_ref}`. Its diff shows only this layer. The other layers are "
-        "separate pull requests, reviewed on their own, and their code is NOT SHOWN "
-        "to you, which is not the same as absent."
+        f"{where} Its diff shows only this layer. The other layers are separate pull "
+        "requests, reviewed on their own, and their code is NOT SHOWN to you, which "
+        "is not the same as absent."
     ]
     for heading, layers in (
         ("Layers below this one (already under it):", stack.below),

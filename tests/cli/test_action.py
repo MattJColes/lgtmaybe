@@ -187,6 +187,18 @@ class TestActionRouting:
         assert diagrams == [True]
         assert cfgs[0].incremental is False
 
+    def test_a_retarget_is_reviewed_in_full_even_with_incremental_on(self, tmp_path, monkeypatch):
+        """`incremental: true` keeps a same-head run a no-op, and a retarget is a
+        same-head run with a new diff: it must still be reviewed in full."""
+        monkeypatch.setenv("INPUT_INCREMENTAL", "true")
+        result, github, _diagrams, cfgs = self._run_edited(
+            tmp_path, monkeypatch, changes={"base": {"ref": {"from": "feature-a"}}}
+        )
+
+        assert result.exit_code == 0, result.output
+        assert cfgs[0].incremental is False
+        assert len(github.posted) == 1
+
     @pytest.mark.parametrize("changes", [{"title": {"from": "old"}}, {"body": {"from": "x"}}, {}])
     def test_an_edit_that_leaves_the_base_alone_reviews_nothing(
         self, tmp_path, monkeypatch, changes

@@ -226,4 +226,78 @@ def test_layer_lookups_are_capped() -> None:
 
     assert ctx.stack is not None
     assert len(ctx.stack.above) <= 8
+    assert ctx.stack.complete is False  # the cap cut it short: size is a lower bound
     assert json.dumps(ctx.stack.model_dump())  # serialisable, bounded
+
+
+def test_a_chain_walked_to_both_ends_is_complete() -> None:
+    def pulls(query: httpx.QueryParams) -> list[dict[str, object]]:
+        if query.get("base") == "feature-b":
+            return [_pr_item(43, base="feature-b", head="feature-c")]
+        return []
+
+    ctx = _context(_GitHub(_meta(), pulls=pulls))
+
+    assert ctx.stack is not None
+    assert ctx.stack.complete is True
+
+
+def test_an_ambiguous_step_ends_the_walk_and_leaves_the_stack_incomplete() -> None:
+    """Two open PRs share the head branch below: the walk cannot tell which is the
+    layer, so it stops there and claims no position."""
+    meta = _meta(base={"sha": "b" * 40, "ref": "feature-a", "repo": {"default_branch": "main"}})
+
+    def pulls(query: httpx.QueryParams) -> list[dict[str, object]]:
+        if query.get("head") == "owner:feature-a":
+            return [
+                _pr_item(41, base="main", head="feature-a"),
+                _pr_item(44, base="main", head="feature-a"),
+            ]
+        if query.get("base") == "feature-b":
+            return [_pr_item(43, base="feature-b", head="feature-c")]
+        return []
+
+    ctx = _context(_GitHub(meta, pulls=pulls))
+
+    assert ctx.stack is not None
+    assert ctx.stack.below == []
+    assert ctx.stack.complete is False
+
+
+def test_a_child_from_a_fork_is_not_a_layer() -> None:
+    def pulls(query: httpx.QueryParams) -> list[dict[str, object]]:
+        if query.get("base") == "feature-b":
+            item = _pr_item(43, base="feature-b", head="feature-c")
+            item["head"] = {"ref": "feature-c", "repo": {"full_name": "fork/repo"}}
+            return [item]
+        return []
+
+    ctx = _context(_GitHub(_meta(), pulls=pulls))
+
+    assert ctx.stack is None
+
+
+def test_a_native_stack_counts_position_from_the_layers_it_lists() -> None:
+    """The payload's position can count layers the listing no longer holds open;
+    the block names the listing's layers, so its position must agree with them."""
+    meta = _meta(
+        base={"sha": "b" * 40, "ref": "feature-a", "repo": {"default_branch": "main"}},
+        stack={"id": 9, "number": 7, "size": 4, "position": 3, "base": {"ref": "main"}},
+    )
+    stacks = {
+        7: {
+            "number": 7,
+            "base": {"ref": "main"},
+            "pull_requests": [
+                {"number": 40, "state": "closed", "head": {"ref": "feature-0"}},
+                {"number": 41, "state": "open", "head": {"ref": "feature-a"}},
+                {"number": 42, "state": "open", "head": {"ref": "feature-b"}},
+                {"number": 43, "state": "open", "head": {"ref": "feature-c"}},
+            ],
+        }
+    }
+
+    ctx = _context(_GitHub(meta, stacks=stacks))
+
+    assert ctx.stack is not None
+    assert (ctx.stack.position, ctx.stack.size) == (2, 3)

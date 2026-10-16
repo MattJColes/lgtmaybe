@@ -1360,6 +1360,11 @@ The canonical machine-readable schemas. These are the source of truth for provid
           "title": "Below",
           "type": "array"
         },
+        "complete": {
+          "default": true,
+          "title": "Complete",
+          "type": "boolean"
+        },
         "position": {
           "minimum": 1,
           "title": "Position",
