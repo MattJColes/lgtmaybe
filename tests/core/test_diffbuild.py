@@ -12,7 +12,12 @@ from __future__ import annotations
 import pytest
 
 from lgtmaybe.core.diff import build_commentable_lines
-from lgtmaybe.core.diffbuild import binary_file_patch, file_patch, has_unsafe_path_chars
+from lgtmaybe.core.diffbuild import (
+    binary_file_patch,
+    file_patch,
+    has_unsafe_path_chars,
+    patch_from_hunks,
+)
 from lgtmaybe.core.diffparse import split_by_file, walk_diff
 
 
@@ -113,6 +118,53 @@ class TestBinaryFilePatch:
         patch = binary_file_patch(old_path=None, new_path="logo.png")
         assert "new file mode 100644" in patch
         assert "Binary files /dev/null and b/logo.png differ" in patch
+
+
+class TestPatchFromHunks:
+    """Wrapping hunks a host served readymade (GitLab's compare API) in a header."""
+
+    def test_an_edit_round_trips_through_the_shared_parser(self) -> None:
+        patch = patch_from_hunks(
+            old_path="app.py", new_path="app.py", hunks="@@ -1,2 +1,3 @@\n import os\n+x = 1\n"
+        )
+
+        assert patch.startswith("diff --git a/app.py b/app.py\n--- a/app.py\n+++ b/app.py\n")
+        added = [(path, new) for path, kind, _old, new, _t in walk_diff(patch) if kind == "+"]
+        assert added == [("app.py", 2)]
+        assert ("app.py", 2, "RIGHT") in build_commentable_lines(patch)
+
+    def test_a_new_file_carries_its_served_mode_and_dev_null(self) -> None:
+        patch = patch_from_hunks(
+            old_path=None, new_path="run.sh", new_mode="100755", hunks="@@ -0,0 +1 @@\n+x\n"
+        )
+
+        assert "new file mode 100755\n--- /dev/null\n+++ b/run.sh\n" in patch
+
+    def test_a_deleted_file_carries_its_served_mode_and_dev_null(self) -> None:
+        patch = patch_from_hunks(
+            old_path="gone.py", new_path=None, old_mode="100644", hunks="@@ -1 +0,0 @@\n-x\n"
+        )
+
+        assert "deleted file mode 100644\n--- a/gone.py\n+++ /dev/null\n" in patch
+
+    def test_a_rename_names_both_paths(self) -> None:
+        patch = patch_from_hunks(
+            old_path="was.py", new_path="moved.py", hunks="@@ -1 +1 @@\n-a\n+b\n"
+        )
+
+        assert "rename from was.py\nrename to moved.py\n--- a/was.py\n+++ b/moved.py\n" in patch
+
+    def test_a_mode_change_without_hunks_is_header_only(self) -> None:
+        patch = patch_from_hunks(
+            old_path="run.sh", new_path="run.sh", old_mode="100644", new_mode="100755", hunks=""
+        )
+
+        assert patch == "diff --git a/run.sh b/run.sh\nold mode 100644\nnew mode 100755\n"
+
+    def test_hunks_without_a_final_newline_gain_one(self) -> None:
+        assert patch_from_hunks(
+            old_path="a.py", new_path="a.py", hunks="@@ -1 +1 @@\n-a\n+b"
+        ).endswith("+b\n")
 
 
 class TestUnsafePaths:

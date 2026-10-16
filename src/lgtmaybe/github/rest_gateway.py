@@ -31,6 +31,7 @@ from lgtmaybe.core.comment import (
     finding_keys,
     last_match,
     marker,
+    partition_findings,
     render_broad,
     render_demoted,
     render_inline_body,
@@ -1667,36 +1668,18 @@ class RestGitHubGateway:
     ]:
         """Split findings into inline comments, body-demoted, and broad findings.
 
-        A finding is posted inline only when it is confidently placed
-        (``anchored``) AND its ``(path, line, side)`` is a real commentable diff
-        line. Anything else — an anchor the engine could not match, or a line
-        outside the diff — is demoted rather than posted on a line we can't stand
-        behind: a comment on the wrong line breaks trust faster than one without a
-        precise line. Inline comments anchor by ``line`` + ``side`` (GitHub's
-        recommended params), not the deprecated ``position`` count.
-
-        A ``broad`` finding (reflection tiered it as redesign / infra / contract /
-        needs-verification) is routed to its own group even when it would anchor,
-        so it renders in the collapsed "Broader observations" block instead of
-        cluttering the must-fix inline list.
+        The placement rule is shared (``core.comment.partition_findings``); only
+        the payload here is GitHub's: inline comments anchor by ``line`` +
+        ``side`` (GitHub's recommended params), not the deprecated ``position``
+        count, and the body renders the same way for every host.
         """
-        inline: list[tuple[dict[str, Any], ReviewFinding]] = []
-        demoted: list[ReviewFinding] = []
-        broad: list[ReviewFinding] = []
-        for f in findings:
-            if f.broad:
-                broad.append(f)
-                continue
-            if not f.anchored or (f.path, f.line, f.side) not in commentable:
-                demoted.append(f)
-                continue
-            # Only the position fields are GitHub's; the body is rendered the
-            # same way for every host.
-            comment: dict[str, Any] = {
+
+        def place(f: ReviewFinding) -> dict[str, Any]:
+            return {
                 "path": f.path,
                 "line": f.line,
                 "side": f.side,
                 "body": render_inline_body(f),
             }
-            inline.append((comment, f))
-        return inline, demoted, broad
+
+        return partition_findings(findings, commentable, place)
