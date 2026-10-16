@@ -230,6 +230,30 @@ def test_an_unusable_sign_in_always_names_the_login_command(
     assert "lgtmaybe login chatgpt" in str(info.value)
 
 
+def test_a_hint_litellm_already_carries_is_not_repeated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The guard's own refusal already names the login command; refresh() must
+    not append it a second time."""
+    from litellm.llms.chatgpt.authenticator import Authenticator
+    from litellm.llms.chatgpt.common_utils import GetAccessTokenError
+
+    monkeypatch.setenv("CHATGPT_TOKEN_DIR", str(tmp_path / "tokens"))
+    _write_token(tmp_path / "tokens")
+
+    def expired(_self: Authenticator) -> str:
+        raise GetAccessTokenError(
+            message=f"token expired. {chatgpt._RELOGIN_HINT}", status_code=401
+        )
+
+    with (
+        patch.object(Authenticator, "get_access_token", expired),
+        pytest.raises(ValueError, match="chatgpt sign-in unusable") as info,
+    ):
+        resolve_credentials(Provider.chatgpt)
+    assert str(info.value).count("lgtmaybe login chatgpt") == 1
+
+
 def test_the_guard_fails_loudly_if_litellm_renames_the_prompt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -237,7 +261,8 @@ def test_the_guard_fails_loudly_if_litellm_renames_the_prompt(
     device-code prompt, patching a missing name would silently guard nothing."""
     from litellm.llms.chatgpt.authenticator import Authenticator
 
-    monkeypatch.delattr(Authenticator, "_login_device_code")
+    # raising=False: the test must also hold on a litellm that already lacks it.
+    monkeypatch.delattr(Authenticator, "_login_device_code", raising=False)
     with pytest.raises(ValueError, match="litellm"):
         chatgpt.forbid_interactive_login()
 
