@@ -2658,9 +2658,7 @@ def test_model_findings_survive_the_scan_cap(monkeypatch) -> None:  # type: igno
     from lgtmaybe.engine.static_analysis import MAX_SCAN_FINDINGS
 
     scans = [_scan_hit(line=2, rule=f"s-{i}") for i in range(MAX_SCAN_FINDINGS + 5)]
-    monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: scans
-    )
+    monkeypatch.setattr("lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: scans)
     model_note = ReviewFinding(
         path="f.py",
         line=2,
@@ -2685,9 +2683,7 @@ def test_suppressed_scan_findings_do_not_spend_cap_slots(monkeypatch) -> None:  
     from lgtmaybe.engine.static_analysis import MAX_SCAN_FINDINGS
 
     scans = [_scan_hit(line=2, rule=f"s-{i}") for i in range(MAX_SCAN_FINDINGS + 5)]
-    monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: scans
-    )
+    monkeypatch.setattr("lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: scans)
     provider = _provider_for([], reflection_keeps_all=True)
     engine = LLMReviewEngine(provider)
     # _finding_mode_cfg overrides land on the static-analysis sub-config, so
@@ -2713,9 +2709,7 @@ def test_scan_cap_considered_count_is_the_pre_cap_count(
     from lgtmaybe.engine.static_analysis import MAX_SCAN_FINDINGS
 
     scans = [_scan_hit(line=2, rule=f"s-{i}") for i in range(MAX_SCAN_FINDINGS + 5)]
-    monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: scans
-    )
+    monkeypatch.setattr("lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: scans)
     provider = _provider_for([], reflection_keeps_all=True)
     engine = LLMReviewEngine(provider)
 
@@ -2726,6 +2720,31 @@ def test_scan_cap_considered_count_is_the_pre_cap_count(
     assert capped, "the cap must have logged"
     assert getattr(capped[0], "kept", None) == MAX_SCAN_FINDINGS
     assert getattr(capped[0], "considered", None) == MAX_SCAN_FINDINGS + 5
+
+
+def test_considered_counts_off_diff_hits_when_the_cap_triggers(
+    monkeypatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The #751 scenario: off-diff drops and the cap fire together, so
+    `considered` must add the off-diff count back onto the on-diff pre-cap
+    count, or the log under-reports how many hits the stage saw."""
+    from lgtmaybe.engine.static_analysis import MAX_SCAN_FINDINGS
+
+    off = [_scan_hit(line=1, rule=f"off-{i}") for i in range(5)]
+    on = [_scan_hit(line=2, rule=f"on-{i}") for i in range(MAX_SCAN_FINDINGS + 1)]
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis",
+        lambda files, cfg: [*off, *on],
+    )
+    provider = _provider_for([], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+
+    with caplog.at_level(logging.INFO, logger="lgtmaybe.engine.engine"):
+        engine.review(_HINT_CTX, _finding_mode_cfg())
+
+    capped = [r for r in caplog.records if "capped" in r.getMessage()]
+    assert capped, "the cap must have logged"
+    assert getattr(capped[0], "considered", None) == MAX_SCAN_FINDINGS + 6
 
 
 # ---------------------------------------------------------------------------
