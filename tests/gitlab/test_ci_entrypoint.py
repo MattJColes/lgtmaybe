@@ -74,6 +74,30 @@ class TestMRUrlFromCIEnv:
         with pytest.raises(Exception, match="CI_PROJECT_PATH"):
             mr_url_from_ci_env()
 
+    def test_accepts_a_server_url_at_the_host_root(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _set(monkeypatch, CI_SERVER_URL="https://gitlab.example.com")
+
+        assert mr_url_from_ci_env() == (
+            "https://gitlab.example.com/group/sub/project/-/merge_requests/7"
+        )
+
+    @pytest.mark.parametrize("url", ["https://example.com/gitlab", "https://example.com/gitlab/"])
+    def test_refuses_a_gitlab_served_under_a_sub_path(
+        self, monkeypatch: pytest.MonkeyPatch, url: str
+    ) -> None:
+        """A sub-path would parse into the project path and leak GITLAB_TOKEN.
+
+        The URL alone cannot tell a sub-path from a nested group, so the parser
+        cannot refuse it; CI_SERVER_URL is the one place the difference is known,
+        and refusing there stops the token before any request is made.
+        """
+        _set(monkeypatch, CI_SERVER_URL=url)
+
+        with pytest.raises(Exception, match="sub-path"):
+            mr_url_from_ci_env()
+
 
 class TestGitLabCIIncrementalDefault:
     """GitLab CI has no ``synchronize`` action to key on, so auto means "incremental
