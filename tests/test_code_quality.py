@@ -228,8 +228,17 @@ def _top_level_subpackage(module: str) -> str:
     return parts[1] if len(parts) > 1 else ""
 
 
+def _is_private(name: str) -> bool:
+    return name.startswith("_") and not (name.startswith("__") and name.endswith("__"))
+
+
 def _cross_package_private_imports() -> list[tuple[str, str, str]]:
-    """Every ``from lgtmaybe.<pkg>... import _name`` that crosses a subpackage."""
+    """Every import of a ``_name`` (or a ``_module`` on the path) that crosses a subpackage.
+
+    Covers ``from lgtmaybe.<pkg>... import _name``, a private module on either
+    import form's path (``import lgtmaybe.<pkg>._mod``), and the package root
+    (``from lgtmaybe import _name``, whose subpackage is ``""``).
+    """
     found: list[tuple[str, str, str]] = []
     for path in sorted(_SRC_PACKAGE.rglob("*.py")):
         relative = path.relative_to(_SRC_PACKAGE.parent).with_suffix("")
@@ -240,23 +249,27 @@ def _cross_package_private_imports() -> list[tuple[str, str, str]]:
         importer = ".".join(parts)
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
-            if not isinstance(node, ast.ImportFrom):
-                continue
-            if node.level:
-                # Resolve a relative import against the importing module's package.
-                base = parts if is_package else parts[:-1]
-                base = base[: len(base) - (node.level - 1)]
-                source = ".".join([*base, *([node.module] if node.module else [])])
-            else:
-                source = node.module or ""
-            if source != "lgtmaybe" and not source.startswith("lgtmaybe."):
-                continue
-            if _top_level_subpackage(source) == _top_level_subpackage(importer):
-                continue
-            for alias in node.names:
-                name = alias.name
-                if name.startswith("_") and not (name.startswith("__") and name.endswith("__")):
-                    found.append((importer, source, name))
+            # (source module, names imported from it)
+            imports: list[tuple[str, list[str]]] = []
+            if isinstance(node, ast.Import):
+                imports = [(alias.name, []) for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                if node.level:
+                    # Resolve a relative import against the importing module's package.
+                    base = parts if is_package else parts[:-1]
+                    base = base[: len(base) - (node.level - 1)]
+                    source = ".".join([*base, *([node.module] if node.module else [])])
+                else:
+                    source = node.module or ""
+                imports = [(source, [alias.name for alias in node.names])]
+            for source, names in imports:
+                if source != "lgtmaybe" and not source.startswith("lgtmaybe."):
+                    continue
+                if _top_level_subpackage(source) == _top_level_subpackage(importer):
+                    continue
+                if any(_is_private(part) for part in source.split(".")[2:]):
+                    found.append((importer, source, ""))
+                found.extend((importer, source, name) for name in names if _is_private(name))
     return found
 
 
@@ -265,5 +278,8 @@ def test_no_private_names_imported_across_packages() -> None:
     offenders = _cross_package_private_imports()
     assert not offenders, (
         "private names imported across lgtmaybe subpackages (make them public): "
-        + ", ".join(f"{importer} imports {source}.{name}" for importer, source, name in offenders)
+        + ", ".join(
+            f"{importer} imports {source}{f'.{name}' if name else ''}"
+            for importer, source, name in offenders
+        )
     )
