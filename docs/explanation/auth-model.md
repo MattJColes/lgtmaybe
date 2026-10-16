@@ -4,15 +4,21 @@ description: How lgtmaybe authenticates to each provider - keyless OIDC/WIF for 
 
 # Auth Model
 
-lgtmaybe supports seven hosted providers plus local ollama, and an
-`openai-compatible` escape hatch for any server that speaks the OpenAI `/v1`
-wire format (DeepSeek's API, llama.cpp, LM Studio, vLLM). The design principle
-is **no static cloud credentials**. Cloud providers use ambient, short-lived
-tokens. Key-based SaaS providers (openai, anthropic, openrouter, zai) need an
-API key, which lives in a secret store, never in committed config. Azure
-straddles both: it accepts a resource key but falls back to ambient Entra
-(Azure AD) credentials, and it always needs the resource endpoint
-(`AZURE_API_BASE`), because each Azure OpenAI deployment lives at its own URL.
+lgtmaybe supports seven hosted [providers](../reference/glossary.md#provider)
+plus local ollama. It also has an `openai-compatible` escape hatch for any
+server that speaks the OpenAI `/v1` wire format (DeepSeek's API, llama.cpp, LM
+Studio, vLLM).
+
+The design principle is **no static cloud credentials**. A static credential is
+a long-lived key you store and rotate by hand.
+
+- Cloud providers use [ambient](../reference/glossary.md#ambient-credentials),
+  short-lived tokens that the environment already provides.
+- Key-based SaaS providers (openai, anthropic, openrouter, zai) need an API key.
+  The key lives in a secret store, never in committed config.
+- Azure sits between the two. It accepts a resource key but falls back to
+  ambient Entra (Azure AD) credentials. It always needs the resource endpoint
+  (`AZURE_API_BASE`), because each Azure OpenAI deployment lives at its own URL.
 
 ## Why Keyless for Cloud
 
@@ -21,8 +27,9 @@ JSON file, have a long lifetime and broad scope. If one leaks from a CI log, a
 misconfigured secrets manager, or a compromised runner, an attacker keeps
 access until someone rotates the key by hand.
 
-OIDC (AWS), Workload Identity Federation (GCP), and federated credentials on an
-Entra app (Azure) issue tokens that:
+[OIDC](../reference/glossary.md#oidc) (AWS),
+[Workload Identity Federation](../reference/glossary.md#wif) (GCP), and
+federated credentials on an Entra app (Azure) issue tokens that:
 
 - expire in minutes, not years;
 - are scoped to a single workflow run;
@@ -49,14 +56,15 @@ In the GitHub Action, pass `aws_role_arn`, `gcp_wif_provider` or
 `azure_client_id` and the action runs this exchange for you. The workflow needs
 `permissions: id-token: write`.
 
-For these reasons, Bedrock and Vertex are ambient-credential-only providers:
+For these reasons, Bedrock and Vertex accept only ambient credentials:
 `--api-key` is ignored for them. Azure defaults to the same keyless path
 (GitHub OIDC to Entra, through `azure-identity`'s `DefaultAzureCredential`) but
 also accepts a resource key for teams that can't adopt federation yet.
 
 ## Chain of Responsibility
 
-When lgtmaybe starts, it resolves credentials for the selected provider:
+When lgtmaybe starts, it resolves credentials for the selected provider. Each
+provider has its own rule for where to look:
 
 1. **Bedrock** hands credential discovery to the AWS SDK, which finds GitHub
    OIDC role credentials, `~/.aws` profiles, environment variables, or an
@@ -119,8 +127,9 @@ When lgtmaybe starts, it resolves credentials for the selected provider:
 ## Code-Host Auth
 
 Everything above authenticates lgtmaybe to a **model provider**. Reading the
-diff and posting the review need a separate credential, chosen by the host in
-the change-request URL:
+diff and posting the review need a separate credential for the
+[code host](../reference/glossary.md#code-host). The host in the change-request
+(pull or merge request) URL decides which one:
 
 | Host | Variable | What it needs |
 |---|---|---|
@@ -142,7 +151,7 @@ provider key, is never written to `.lgtmaybe.yml` or logged.
 
 ## Least-Privilege IAM
 
-For Bedrock, the minimum IAM policy is `bedrock:InvokeModel` and (if streaming)
+For Bedrock, the minimum [IAM](../reference/glossary.md#iam) policy is `bedrock:InvokeModel` and (if streaming)
 `bedrock:InvokeModelWithResponseStream` on the specific model ARN. No other AWS
 permissions are needed or requested.
 

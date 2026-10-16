@@ -5,23 +5,27 @@ description: What lgtmaybe reviews and how it bounds the work - only changed lin
 # What Gets Reviewed
 
 This page explains what lgtmaybe looks at, how it bounds the work, and what the
-output looks like on a pull or merge request and on the command line.
+output looks like on a pull or merge request and on the command line. Each kind
+of check below is a [lens](../reference/glossary.md#lens): one focused review
+question for the model.
 
 ## What It Looks At
 
 lgtmaybe reviews the **diff of a pull request** (or a GitLab merge request): the
 lines it adds or changes, not the whole repository. It fetches that diff from
-your code host's REST API and **never checks out or runs the PR's code**, so a
-malicious change can't execute anything in the reviewer's environment. The diff
-is treated as untrusted input throughout, including against prompt-injection
-attempts hidden in PR text.
+your code host's REST API and **never checks out or runs the PR's code**. A
+malicious change therefore can't execute anything in the reviewer's environment.
+lgtmaybe treats the diff as untrusted input throughout, including against
+[prompt-injection](../reference/glossary.md#prompt-injection) attempts hidden in
+PR text.
 
-To review changes in context, lgtmaybe also pads each changed hunk with
-**surrounding lines** read from the head revision of the changed file. The
-model uses them to understand the change (the enclosing function, nearby
-definitions) but only comments on changed lines. The padding is budget-scaled
-and capped by `context_lines` (default 20, `0` disables it). It is fetched
-read-only via the API and redacted like the diff.
+To review changes in context, lgtmaybe also pads each changed
+[hunk](../reference/glossary.md#hunk) with **surrounding lines** read from the
+head revision of the changed file. The model uses them to understand the change
+(the enclosing function, nearby definitions) but only comments on changed lines.
+The padding is budget-scaled and capped by `context_lines` (default 20, `0`
+disables it). lgtmaybe fetches it read-only via the API and
+[redacts](../reference/glossary.md#redaction) it like the diff.
 
 Before the diff reaches the model it is cleaned:
 
@@ -95,14 +99,16 @@ looks for:
   verification, predictable randomness for security tokens.
 - **Sensitive-data exposure**: secrets or PII in logs, error responses, or
   analytics (passwords, API keys, tokens/session IDs, SSNs, payment-card data).
-- **CI / IaC misconfiguration**: untrusted input interpolated into workflow
-  `run:` steps, third-party actions not pinned to a SHA, overly broad IAM
-  policies, public buckets, privileged containers, secrets echoed into build
-  logs. It also flags controls that only look enforced (an `environment:` key
-  used as an approval gate when the environment has no required reviewers, or a
-  budget alert treated as a spending cap) and checks that cannot fail
-  (`continue-on-error: true`, `|| true` on a test or scan step), because a
-  skipped check that reports a pass is worse than no check.
+- **CI / IaC (infrastructure as code) misconfiguration**: untrusted input
+  interpolated into workflow `run:` steps, third-party actions not pinned to a
+  SHA, overly broad IAM policies, public buckets, privileged containers, secrets
+  echoed into build logs. It also flags:
+    - controls that only look enforced, such as an `environment:` key used as an
+      approval gate when the environment has no required reviewers, or a budget
+      alert treated as a spending cap;
+    - checks that cannot fail, such as `continue-on-error: true` or `|| true` on
+      a test or scan step. A skipped check that reports a pass is worse than no
+      check.
 - **Resource / DoS safety**: missing timeouts, unbounded loops or allocations,
   regexes vulnerable to catastrophic backtracking (ReDoS).
 
@@ -146,16 +152,16 @@ speculate about code it cannot see.
 
 Two lighter checks round out a review:
 
-- **Missing or weak tests**: when the diff adds a function, branch, or error
-  case with no accompanying test, the reviewer raises a `low`/`medium` finding
-  with a concrete, runnable test in its `suggestion` field, in the project's
-  existing test idiom. Tests added in the diff that don't really test anything
-  are flagged too: assertion-free, mocked until only the mock is exercised, or
-  flaky (sleep-based waits, wall-clock or ordering dependence). Renames,
-  comments, and trivial formatting changes are left alone.
+- **Missing or weak tests**: the diff adds a function, branch, or error case
+  with no accompanying test. The reviewer raises a `low`/`medium` finding. Its
+  `suggestion` field holds a concrete, runnable test in the project's existing
+  test idiom. It also flags tests added in the diff that don't really test
+  anything: assertion-free, mocked until only the mock is exercised, or flaky
+  (sleep-based waits, wall-clock or ordering dependence). It leaves renames,
+  comments, and trivial formatting changes alone.
 - **Documentation gaps and stale docs**: a public surface added without a
   docstring, or a name or signature that contradicts what the code does, is
-  flagged at `info`/`low`. A docstring or comment the change just made wrong is
+  flagged at `info`/`low`. A docstring or comment the change made wrong is
   flagged up to `medium`, because a comment that lies is worse than none.
   Private helpers and self-evident code are left alone.
 
@@ -258,41 +264,52 @@ Where the stated intent comes from:
   no commits beyond the base yet (or with `--uncommitted`), nothing states an
   intent and the lens is skipped.
 
-Under the default `fast` preset, intent is folded into the correctness call
-rather than run as a call of its own.
+Under the default `fast` [preset](../reference/glossary.md#preset), intent is
+folded into the correctness call rather than run as a call of its own.
 
 ### The Lens Is Told What It Was Not Shown
 
 An intent lens judging "did the author keep their promise?" against a
 *filtered* diff will call a kept promise broken. Files go missing for seven
-reasons: the generated/binary/vendored skip, your `include_paths` /
-`exclude_paths` globs, the `max_file_diff_lines` size cap, the `max_files` cap,
-a triage skip, an incremental scope, and simply being in another batch (lenses
-run once **per batch**, so on a large PR each call sees only part of the
-change).
+reasons:
+
+- the generated/binary/vendored skip;
+- your `include_paths` / `exclude_paths` globs;
+- the `max_file_diff_lines` size cap;
+- the `max_files` cap;
+- a triage skip;
+- an incremental scope;
+- being in another [batch](../reference/glossary.md#batch). Lenses run once
+  **per batch**, so on a large PR each call sees only part of the change.
 
 So each call is told which of the PR's files it cannot see. The list goes to
-every lens, and the intent lens also gets the rule that goes with it: a claim
-about a file that was not shown is **not shown, not undone**. The list is
-derived from what is left of the PR after the batch, so it covers every one of
-those mechanisms without caring which applied. It is capped, then wrapped and
-neutralised as untrusted data, because filenames are attacker-controlled on a
-fork PR too. That is why lgtmaybe doesn't report "the stated intent to
-regenerate X is not reflected in the diff" when X is a generated file it was
-never allowed to read.
+every lens. The intent lens also gets the rule that goes with it: a claim about
+a file that was not shown is **not shown, not undone**.
 
-The intent text is attacker-controlled on a fork PR, so it is treated exactly
-like the diff: secrets are redacted, it is wrapped as untrusted data with
-neutralised delimiters, and the model is told never to follow instructions
-inside it. Only the call that carries the intent lens ever sees it. When a PR
-states no intent at all, the lens is skipped instead of spending a model call.
+lgtmaybe derives the list from what is left of the PR after the batch. It
+therefore covers every one of those mechanisms without caring which applied. It
+is capped, then wrapped and neutralised as untrusted data, because filenames are
+attacker-controlled on a fork PR too. That is why lgtmaybe doesn't report "the
+stated intent to regenerate X is not reflected in the diff" when X is a
+generated file it was never allowed to read.
+
+The intent text is attacker-controlled on a fork PR, so lgtmaybe treats it
+exactly like the diff:
+
+- secrets are redacted;
+- it is wrapped as untrusted data with neutralised delimiters;
+- the model is told never to follow instructions inside it.
+
+Only the call that carries the intent lens ever sees it. When a PR states no
+intent at all, the lens is skipped instead of spending a model call.
 
 ## Spec: Does the PR Deliver the Specification It Commits To?
 
-If your repository drives its work from a committed specification, that spec is
-a better statement of intent than a PR description: it is structured, it
+Your repository may drive its work from a committed specification. That spec
+is a better statement of intent than a PR description: it is structured, it
 predates the code, and its task list records what the author claims to have
-finished. The spec lens checks the diff against it in **both** directions.
+finished. The [spec lens](../reference/glossary.md#spec-lens) checks the diff
+against it in **both** directions.
 
 lgtmaybe recognises three layouts out of the box, plus your own:
 
@@ -341,10 +358,15 @@ the work is absent.
 
 ### Which Spec, and When It Stays Quiet
 
-A monorepo can hold forty spec directories, so lgtmaybe ranks them against the
-PR (the PR edits the spec, its branch is named after one, or its title,
-description or commits name one) and sends at most two. Spec Kit names branches
-after the spec directory, which is what makes the branch signal work. **When
+A monorepo can hold forty spec directories. lgtmaybe ranks them against the PR
+on these signals, and sends at most two:
+
+- the PR edits the spec;
+- the PR's branch is named after it;
+- the PR's title, description or commits name it.
+
+Spec Kit names branches after the spec directory, which is what makes the
+branch signal work. **When
 nothing matches, the lens does not run at all**: no model call, no prompt bytes.
 The same is true when no spec system is present, which is the common case, so
 a repository without specs pays nothing.
@@ -357,29 +379,40 @@ or as an Action input.
 ### The Spec Lens Is Told What It Was Not Shown
 
 A requirement is delivered by *code*, so this lens is even more exposed than
-the intent lens to the filtered-diff trap: told nothing, it reports every
+the intent lens to the filtered-diff trap. Told nothing, it reports every
 requirement implemented in another batch as undelivered. It gets the same
-correction: the list of the PR's files this call cannot see, and the rule that a
-requirement delivered in one of them is **not shown, not undelivered**.
+correction:
+
+- the list of the PR's files this call cannot see;
+- the rule that a requirement delivered in one of them is **not shown, not
+  undelivered**.
 
 Spec text is treated exactly like the diff: redacted, wrapped as untrusted data
 in its own neutralised block, and never obeyed. That is deliberate. A spec is
 usually committed in the same PR that implements it, so on a fork PR the author
-controls the requirements their own change is judged against. Files the PR
-changes are read from its head text for the same reason (the base branch does
-not have them yet); everything else comes from the checked-out workspace, which
-on `pull_request_target` is the trusted base branch. The worst a planted spec
-can do is suppress a spec finding, because no other lens sees the block.
+controls the requirements their own change is judged against.
+
+Files the PR changes are read from its head text for the same reason: the base
+branch does not have them yet. Everything else comes from the checked-out
+workspace, which on `pull_request_target` is the trusted base branch. The worst
+a planted spec can do is suppress a spec finding, because no other lens sees the
+block.
 
 ## Ponytail: The Laziest Senior Dev in the Room
 
 The best code is the code you never wrote. Inspired by
 [Ponytail 5](https://github.com/DietrichGebert/ponytail), this lens reviews new
 code with a senior engineer's reflex to **not** add code. It walks Ponytail's
-ladder and stops at the first rung that holds: does this need to exist, is it
-already in this codebase, does the standard library or platform do it, does an
-installed dependency, can it be one line? It flags what skipped a rung (graded
-`info` to `medium`, and deliberately restrained):
+ladder and stops at the first rung that holds:
+
+1. Does this need to exist?
+2. Is it already in this codebase?
+3. Does the standard library or platform do it?
+4. Does an installed dependency do it?
+5. Can it be one line?
+
+It flags what skipped a rung (graded `info` to `medium`, and deliberately
+restrained):
 
 - **Needless code (YAGNI)**: speculative generality, "just in case" parameters,
   an abstraction with a single caller, or scaffolding for a future that isn't
@@ -393,11 +426,15 @@ installed dependency, can it be one line? It flags what skipped a rung (graded
 - **Premature configurability**: flags, hooks, or options no caller uses yet.
 
 It prefers deleting or collapsing code over adding to it, and puts the smaller
-replacement in the suggestion. It checks the code really is unused before saying
-so, never collapses an existing port, layer, or interface boundary (an adapter
-implementing one is not needless), and treats a `shortcut:` comment as a
-recorded decision rather than a finding. The complexity lens asks "is this code
-hard to follow?"; Ponytail asks "should this code exist at all?"
+replacement in the suggestion. It also:
+
+- checks the code really is unused before saying so;
+- never collapses an existing port, layer, or interface boundary (an adapter
+  implementing one is not needless);
+- treats a `shortcut:` comment as a recorded decision rather than a finding.
+
+The complexity lens asks "is this code hard to follow?"; Ponytail asks "should
+this code exist at all?"
 
 We take Ponytail's leanness rules, not its whole review: Ponytail 5's own
 `/ponytail-review` also checks bugs, security, load, and tests, which here are
@@ -406,9 +443,9 @@ separate lenses.
 ## Architecture: What Will This Make Hard to Change?
 
 Architecture is the set of decisions that are expensive to reverse. This lens
-flags only decisions the change itself introduces, graded `info` to `medium`,
-and every finding has to open with a concrete change scenario: "when X changes,
-Y and Z have to change with it". A finding that only names a principle ("this
+flags only decisions the change itself introduces, graded `info` to `medium`.
+Every finding has to open with a concrete change scenario: "when X changes, Y
+and Z have to change with it". A finding that only names a principle ("this
 violates SRP") is not allowed, because the name explains nothing on its own.
 
 - **Coupling across boundaries**: one module reaching into another's internals,
@@ -431,21 +468,33 @@ violates SRP") is not allowed, because the name explains nothing on its own.
 - **Leaky ports**: an interface that forces implementers to stub methods they
   don't need, or vendor types crossing a port so the core is tied to the vendor.
 
-Its evidence bar keeps it from becoming a lecture. It never proposes a new
-abstraction unless the diff shows a second implementation or caller, or the
-coupling crosses a boundary the repository already has. It reads layers from
-the repository's own paths and documented architecture rather than inventing
-them, skips tests, scripts and private helpers, and hedges to `info` or `low`
-when the claim depends on code it cannot see. Most findings carry no one-click
-suggestion: a structural fix is named in the finding (move the function, invert
-the dependency) instead.
+Its evidence bar keeps it from becoming a lecture:
 
-The ideas come from the classic literature on design: Parnas on information
-hiding, Constantine and Yourdon on coupling and cohesion, Liskov and Wing on
-substitutability, Meyer on design by contract, Martin on dependency direction,
-Cockburn's ports and adapters, Evans on bounded contexts, Fowler's refactoring
-catalogue, Bloch on API design, and Khononov on balancing coupling. See
-[ATTRIBUTION.md](https://github.com/MattJColes/lgtmaybe/blob/main/ATTRIBUTION.md).
+- It never proposes a new abstraction unless the diff shows a second
+  implementation or caller, or the coupling crosses a boundary the repository
+  already has.
+- It reads layers from the repository's own paths and documented architecture
+  rather than inventing them.
+- It skips tests, scripts and private helpers.
+- It hedges to `info` or `low` when the claim depends on code it cannot see.
+
+Most findings carry no one-click suggestion. The finding names a structural fix
+instead (move the function, invert the dependency).
+
+The ideas come from the classic literature on design:
+
+- Parnas on information hiding;
+- Constantine and Yourdon on coupling and cohesion;
+- Liskov and Wing on substitutability;
+- Meyer on design by contract;
+- Martin on dependency direction;
+- Cockburn's ports and adapters;
+- Evans on bounded contexts;
+- Fowler's refactoring catalogue;
+- Bloch on API design;
+- Khononov on balancing coupling.
+
+See [ATTRIBUTION.md](https://github.com/MattJColes/lgtmaybe/blob/main/ATTRIBUTION.md).
 The complexity lens asks "is this hard to follow?" and ponytail asks "should
 this exist?"; architecture asks "what will this make hard to change?". For a
 finer grain, the opt-in `pack:design` adds Ousterhout-style checks such as
@@ -453,42 +502,58 @@ shallow modules and information leakage.
 
 ## When Lenses Disagree
 
-Each lens is prompted on its own and none of them names another, so two lenses
-could in principle give opposite advice about the same lines: one says "cut
-this", another says "this guard is what keeps it safe". Posting both tells the
-author two contradictory things, so lgtmaybe stops it at four points:
+Each lens is prompted on its own and none of them names another. Two lenses
+could therefore, in principle, give opposite advice about the same lines. One
+says "cut this", another says "this guard is what keeps it safe". Posting both
+tells the author two contradictory things, so lgtmaybe stops it at four points:
 
-1. **Nobody cuts protective code.** A rule shared by every lens, including
-   bundled packs and your own custom lenses, forbids recommending the removal or
-   weakening of validation at a trust boundary, error handling that prevents data
-   loss, security controls, or accessibility support. Any shorter replacement
-   must keep every edge case and error path. This is Ponytail 5's "never cut"
-   list, applied to all of them.
-2. **Each lens has its own evidence bar.** The bars keep territories apart
-   without lenses knowing about each other: ponytail never collapses an existing
-   boundary, architecture never proposes a new one without a visible second
-   implementation, and complexity only suggests extracting duplicated code when
-   the copies have uniform callers (never through a flag argument).
-3. **Reflection referees.** The self-reflection pass sees every finding at once
-   and, when two give opposite advice about the same code, keeps the one higher
-   on the ladder: correctness, security, performance, tests, architecture,
-   complexity, ponytail. That is Ponytail 5's own review order (correctness,
-   safety, load, tests, speed, leanness) mapped onto these lenses, with design
-   slotted above readability. A finding whose lens is not
-   on the ladder, such as a custom or pack lens, is never arbitrated.
-4. **A deterministic backstop.** After reflection (and even with `--no-reflect`),
-   `engine/conflicts.py` drops a lower-ranked finding that sits within three
-   lines of a higher-ranked one from a lens pair declared opposed, today ponytail
-   against correctness, security, and architecture. Group ids, custom and pack lenses, and
-   scanner hits declare no opposition, so the backstop never guesses about them.
-   It sees only where a finding sits, not what it advises, which is why it acts
-   only on pairs that oppose each other by nature. Reflection reads the advice
-   itself, so it covers the rest of the ladder, and drops one of two findings
-   only when they really do point opposite ways.
+1.  **Nobody cuts protective code.** A rule shared by every lens covers bundled
+    packs and your own custom lenses too. It forbids recommending the removal
+    or weakening of:
 
-The `counter-advice` eval fixture measures this: it plants a genuine lean catch
-beside upload validation that looks redundant and an adapter that looks like a
-pass-through, and fails the run if a model recommends cutting either.
+    - validation at a trust boundary;
+    - error handling that prevents data loss;
+    - security controls;
+    - accessibility support.
+
+    Any shorter replacement must keep every edge case and error path. This is
+    Ponytail 5's "never cut" list, applied to all of them.
+
+2.  **Each lens has its own evidence bar.** The bars keep territories apart
+    without lenses knowing about each other:
+
+    - ponytail never collapses an existing boundary;
+    - architecture never proposes a new one without a visible second
+      implementation;
+    - complexity only suggests extracting duplicated code when the copies have
+      uniform callers (never through a flag argument).
+
+3.  **Reflection referees.** The
+    [self-reflection](../reference/glossary.md#reflection) pass sees every
+    finding at once. When two give opposite advice about the same code, it
+    keeps the one higher on the ladder: correctness, security, performance,
+    tests, architecture, complexity, ponytail. That is Ponytail 5's own review
+    order (correctness, safety, load, tests, speed, leanness) mapped onto these
+    lenses, with design slotted above readability. A finding whose lens is not
+    on the ladder, such as a custom or pack lens, is never arbitrated.
+
+4.  **A deterministic backstop.** After reflection (and even with
+    `--no-reflect`), `engine/conflicts.py` drops a lower-ranked finding when:
+
+    - it sits within three lines of a higher-ranked one; and
+    - the two come from a lens pair declared opposed. Today that is ponytail
+      against correctness, security, and architecture.
+
+    Group ids, custom and pack lenses, and scanner hits declare no opposition,
+    so the backstop never guesses about them. It sees only where a finding
+    sits, not what it advises. That is why it acts only on pairs that oppose
+    each other by nature. Reflection reads the advice itself, so it covers the
+    rest of the ladder. It drops one of two findings only when they really do
+    point opposite ways.
+
+The `counter-advice` eval fixture measures this. It plants a genuine lean catch
+beside two traps: upload validation that looks redundant, and an adapter that
+looks like a pass-through. The run fails if a model recommends cutting either.
 
 ## How the Scope Is Bounded
 
@@ -542,27 +607,37 @@ Each finding has:
 
 The ten everyday review categories are security, correctness, deprecation,
 tests, documentation, performance, complexity, intent, ponytail, and
-architecture; `spec` is an eleventh that runs only when a committed spec matches
+architecture. `spec` is an eleventh that runs only when a committed spec matches
 the PR. The default `fast` preset covers the ten in five calls, one per concern:
-security, correctness (with stated intent folded in), code health (performance,
-complexity, ponytail, deprecation), artefacts (tests, documentation), and
-architecture. The same five run on every provider; worker count changes only how they are scheduled. `preset: full` runs
-each category as its own call, with a worked example of its own finding type.
 
-Security, correctness, deprecation, and performance findings without a concrete
-`failure_scenario` are dropped, as are `fast` code-health findings the model left
-unattributed (any of them may be a performance or deprecation one), and the rest
-are merged and de-duplicated. A
-self-reflection pass then audits the rest and drops low-confidence
-findings, so the model's first guesses are filtered before anything is posted.
+- security;
+- correctness (with stated intent folded in);
+- code health (performance, complexity, ponytail, deprecation);
+- artefacts (tests, documentation);
+- architecture.
+
+The same five run on every provider; worker count changes only how they are
+scheduled. `preset: full` runs each category as its own call, with a worked
+example of its own finding type.
+
+lgtmaybe drops two kinds of finding:
+
+- security, correctness, deprecation, and performance findings without a
+  concrete `failure_scenario`;
+- `fast` code-health findings the model left unattributed (any of them may be a
+  performance or deprecation one).
+
+It merges and de-duplicates the rest. A self-reflection pass then audits the
+rest and drops low-confidence findings. So the model's first guesses are
+filtered before anything is posted.
 
 The reviewer only sees the diff and some surrounding context: a *slice* of the
-codebase, not the whole thing. When a concern depends on code it can't see (a
-guard, a base class, an idempotency check that may live in an unshown file), it
-hedges and lowers the severity rather than asserting the thing is missing, and
-the self-reflection pass drops findings that rest on such assumptions. Genuine
-gaps in the diff itself, such as a changed path with no test or a new public
-surface left undocumented, are exempt and still raised.
+codebase, not the whole thing. A concern may depend on code it can't see, such
+as a guard, a base class, or an idempotency check that may live in an unshown
+file. Then it hedges and lowers the severity rather than asserting the thing is
+missing. The self-reflection pass drops findings that rest on such assumptions.
+Genuine gaps in the diff itself are exempt and still raised, such as a changed
+path with no test or a new public surface left undocumented.
 
 ## What the Response Looks Like
 
@@ -578,19 +653,20 @@ lgtmaybe posts **one review** containing:
 - an **inline comment** on the exact changed line for each finding, and
 - a **summary** that names the model used.
 
-Each finding lands on the line that triggered it, with its severity in the
-title, the explanation in the body, and, where the fix is clear, a suggested
-change you can commit straight from the PR. A finding the engine could not
-place on a changed line is listed in the summary instead of posted on a guessed
-line, and only when it is serious enough (`unanchored_min_severity`, default
-`high`).
+Each finding lands on the line that triggered it. Its severity is in the title
+and the explanation in the body. Where the fix is clear, it adds a suggested
+change you can commit straight from the PR.
+
+A finding the engine could not place on a changed line is listed in the summary
+instead of posted on a guessed line. It is listed only when it is serious enough
+(`unanchored_min_severity`, default `high`).
 
 ![An inline lgtmaybe review comment flagging a [MEDIUM] server-side request forgery (SSRF) risk where a user_id is concatenated into a URL, with a suggested validation fix](../assets/review-ssrf.png){ width="660" }
 
 ![An inline lgtmaybe review comment flagging a [CRITICAL] command injection vulnerability in an archive function using subprocess with shell=True, with a suggested fix that avoids the shell](../assets/review-command-injection.png){ width="660" }
 
 The summary carries a hidden marker (`<!-- lgtmaybe -->`). Re-running at the
-same commit **updates** that summary instead of creating a duplicate; a
+same commit **updates** that summary instead of creating a duplicate. A
 completed review at a new commit posts a fresh summary and leaves the older one
 as history. Findings already posted are never posted twice.
 
@@ -613,24 +689,28 @@ A comment's title line carries the finding's provenance in its brackets:
   floor to drop everything below a score you choose.
 
 Each part drops away when it isn't there: with `reflect: false` there is no
-score, and the badge is just the lens.
+score, and the badge is the lens alone.
 
 Neither GitHub's nor Gitea's review API can edit an inline comment once it is
-posted, so an inline comment's score is **frozen at first post**: a later run
+posted. So an inline comment's score is **frozen at first post**: a later run
 that judges the same finding differently won't change it. Findings in the
 summary body (the "Additional findings" and "Broader observations" sections)
 are rewritten on every run, so those badges do track. Severity and title have
-always behaved this way; the badge just makes it visible.
+always behaved this way; the badge makes it visible.
 
 ### Resolving Conversations Once They're Fixed
 
 Each inline comment also carries hidden per-finding ids. When you push a fix and
-lgtmaybe runs again, it checks its own open conversations. If a finding it
-raised is **no longer produced** *and* GitHub marks that thread **outdated**
-(the code under it changed), lgtmaybe treats it as fixed: it replies
-`✅ Looks resolved.` and resolves the conversation. Both conditions must hold,
-so a thread is never collapsed just because the lines around it shifted, or
-because one run happened not to re-flag it while the code stayed the same.
+lgtmaybe runs again, it checks its own open conversations. lgtmaybe treats a
+finding as fixed when both of these hold:
+
+- the finding it raised is **no longer produced**;
+- GitHub marks that thread **outdated** (the code under it changed).
+
+It then replies `✅ Looks resolved.` and resolves the conversation. Because both
+conditions must hold, a thread is never collapsed only because the lines around
+it shifted. Nor is it collapsed because one run happened not to re-flag it
+while the code stayed the same.
 
 This is on by default. To leave conversations for manual resolution, set
 `resolve_fixed: false` in `.lgtmaybe.yml` (or the Action's `resolve_fixed`
@@ -676,8 +756,9 @@ summary is short:
 ```
 
 The risk segment comes from the [risk of change](risk-of-change.md) assessment
-and is absent when that is turned off (`--no-risk`, or `risk.enabled: false`). If the file cap kicked in, the summary says so
-(for example "Reviewed the top 50 of 120 changed files"). lgtmaybe never fails
+and is absent when that is turned off (`--no-risk`, or `risk.enabled: false`).
+If the file cap kicked in, the summary says so (for example "Reviewed the top 50
+of 120 changed files"). lgtmaybe never fails
 silently: any error is posted back to the PR as a short comment.
 
 ### On the Command Line
@@ -694,9 +775,9 @@ and asks for `--base`.
 - `--uncommitted` reviews only the uncommitted edits against `HEAD`.
 - `--base <ref>` picks a different base.
 
-Both worktree modes include files you haven't `git add`ed yet (a brand-new file
-is often the one you most want a second pair of eyes on), while anything
-`.gitignore` excludes stays out. The default output is a readable listing
+Both worktree modes include files you haven't `git add`ed yet. A brand-new file
+is often the one you most want a second pair of eyes on. Anything `.gitignore`
+excludes stays out. The default output is a readable listing
 followed by the summary line:
 
 ```console
@@ -728,9 +809,13 @@ coding agent can read and apply, for a local review-and-fix loop. See
 [Use from a coding agent over MCP](../how-to/use-from-a-coding-agent-over-mcp.md).
 
 `--format sarif` prints a SARIF 2.1.0 log for GitHub code scanning or an IDE
-SARIF viewer: one rule per lens, the severity folded onto SARIF's three levels,
-and the finding's fingerprint and identity as `partialFingerprints`. See
-[Upload findings as SARIF](../how-to/upload-findings-as-sarif.md).
+SARIF viewer. The log has:
+
+- one rule per lens;
+- the severity folded onto SARIF's three levels;
+- the finding's fingerprint and identity as `partialFingerprints`.
+
+See [Upload findings as SARIF](../how-to/upload-findings-as-sarif.md).
 
 ## See Also
 

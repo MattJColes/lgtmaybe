@@ -85,7 +85,7 @@ Running many model calls at the same time instead of one after another. Each
 ## Finding
 
 One issue lgtmaybe reports. It has a [severity](#severity), a title, a body
-that says what goes wrong and why it matters, and often a suggested fix. On a
+that says what goes wrong and why it matters, and sometimes a suggested fix. On a
 code host it becomes an inline comment on the changed line.
 
 ## Forge
@@ -126,7 +126,9 @@ request in GitHub Actions or GitLab CI.
 
 ## Lens
 
-One focused review question, asked in its own model call. The built-in lenses
+One focused review question for the model. Under the default
+[preset](#preset), some lenses share a model call; under `full`, each gets its
+own. The built-in lenses
 cover security, correctness, tests, documentation, performance, complexity,
 needless code ([ponytail](#ponytail)), architecture, intent, specs and
 deprecated APIs. You can add your own. See

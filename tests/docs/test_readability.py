@@ -35,14 +35,6 @@ _GENERATED = {"docs/reference/config.md"}
 
 NOT_YET_PASSING: frozenset[str] = frozenset(
     {
-        "README.md",
-        "docs/index.md",
-        "docs/tutorial/getting-started.md",
-        "docs/explanation/architecture.md",
-        "docs/explanation/data-and-privacy.md",
-        "docs/explanation/risk-of-change.md",
-        "docs/explanation/trust-and-cost.md",
-        "docs/explanation/what-gets-reviewed.md",
         "docs/how-to/add-a-custom-lens.md",
         "docs/how-to/calibrate-reviews-to-your-project.md",
         "docs/how-to/configure-lgtmaybe-yml.md",

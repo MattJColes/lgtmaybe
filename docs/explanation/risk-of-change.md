@@ -6,12 +6,13 @@ description: How lgtmaybe sizes a pull request's risk of change - low, medium, h
 
 Every review carries a **risk of change** verdict: `low`, `medium`, `high` or
 `critical`, with the reasons that produced it. It answers a different question
-from the findings. A finding says "this line is wrong". The verdict says "this
+from the [findings](../reference/glossary.md#finding). A finding says "this line is wrong". The verdict says "this
 change can reach a long way, so read it carefully", even when every line is
 right.
 
-The verdict is deterministic. It makes no model call, so it costs nothing, it
-reads the same on every re-run of the same head, and a workflow can rely on it.
+The verdict is deterministic: it comes from fixed rules. It makes no model
+call, so it costs nothing. It reads the same on every re-run of
+the same head commit, so a workflow can rely on it.
 
 ## Where You See It
 
@@ -21,12 +22,14 @@ The review summary line names the level and its top reason:
 3 findings · risk high (`src/core/models.py` is imported by 84 files, +2 more) · provider … · model … · lgtmaybe …
 ```
 
-The change overview lists every reason in a **Risk of Change** section above
-High Impact Areas. The summary carries the verdict even when the overview is
+The [change overview](../reference/glossary.md#change-overview) lists every
+reason in a **Risk of Change** section above
+[High Impact Areas](../reference/glossary.md#high-impact-areas). The summary
+carries the verdict even when the overview is
 turned off or skipped, so every review has it.
 
-The summary also carries a hidden marker, `<!-- lgtmaybe-risk:high -->`, and
-with `pr_labels` on the PR gets a `risk/<level>` label. Locally, `lgtmaybe
+The summary also carries a hidden marker, `<!-- lgtmaybe-risk:high -->`. With
+`pr_labels` on, the PR gets a `risk/<level>` label. Locally, `lgtmaybe
 review` prints the same summary line.
 
 ## How the Level Is Decided
@@ -56,20 +59,30 @@ change `critical`.
 
 ## Blast Radius
 
+The blast radius is how much existing code a change can reach. lgtmaybe
+measures it by counting the files that import each changed file.
+
 The importer count comes from one [ast-grep](https://ast-grep.github.io/) scan
 of the checked-out repository for Python, TypeScript and JavaScript imports. It
 parses files and runs nothing. On `pull_request_target` the checkout is the
 trusted base branch, and nothing from the scan is sent to the model.
 
-The count measures the code that already depends on a file. A file the PR adds
-has no existing importers, importers the PR itself changes are left out
-because they are already in the diff, and test files don't count as importers.
+The count measures the code that already depends on a file:
+
+- A file the PR adds has no existing importers.
+- Importers the PR itself changes are left out, because they are already in the
+  diff.
+- Test files don't count as importers.
 
 When a blast radius can't be measured, the verdict names the file instead of
-guessing. This happens for a language the scan doesn't read, when there is no
-checkout, when the ast-grep binary is missing or the scan fails, or when the
-scan runs past its 20-second limit. A `low` verdict with
-unmeasured files always says so:
+guessing. This happens:
+
+- for a language the scan doesn't read;
+- when there is no checkout;
+- when the ast-grep binary is missing or the scan fails;
+- when the scan runs past its 20-second limit.
+
+A `low` verdict with unmeasured files always says so:
 
 ```text
 risk low (blast radius not assessed: `lib/billing.rb`)
