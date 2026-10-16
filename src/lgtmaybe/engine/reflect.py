@@ -51,7 +51,8 @@ _ARBITRATION_RULE = (
     "code that the other says to keep, guard, extract, or restructure — keep the one whose "
     "`category` ranks higher on this ladder and drop the other: "
     + " > ".join(c.value for c in PRECEDENCE)
-    + ".\n"
+    + ". If either finding's `category` is not on this ladder, keep both and judge each "
+    "on its own merits.\n"
 )
 
 _REFLECT_SYSTEM = (

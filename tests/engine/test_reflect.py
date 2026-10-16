@@ -943,3 +943,12 @@ def test_the_auditor_arbitrates_opposing_advice_on_the_shared_ladder() -> None:
 
     assert "opposite advice" in _REFLECT_SYSTEM
     assert " > ".join(c.value for c in PRECEDENCE) in _REFLECT_SYSTEM
+
+
+def test_the_auditor_arbitrates_only_ranked_categories() -> None:
+    """The deterministic backstop never guesses about custom, pack, group or scanner
+    findings; the model referee must not either, or the guarantee the docs state
+    holds only under --no-reflect."""
+    from lgtmaybe.engine.reflect import _REFLECT_SYSTEM
+
+    assert "not on this ladder, keep both" in _REFLECT_SYSTEM

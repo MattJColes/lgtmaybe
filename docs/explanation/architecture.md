@@ -278,18 +278,20 @@ matches the PR) and any custom lenses join the same fan-out.
    it. It is bounded by the same hop and file caps as the path fetch.
 
    The auditor is also the first referee for opposing advice: when two findings
-   point opposite ways about the same code, it keeps the higher-ranked one.
+   from lenses on the precedence ladder point opposite ways about the same code,
+   it keeps the higher-ranked one.
 
-   **arbitrate**: the deterministic referee behind it (`engine/conflicts.py`),
+9. **arbitrate**: the deterministic referee behind it (`engine/conflicts.py`),
    which also runs under `--no-reflect`. A finding from a declared-opposed lens
    pair (ponytail against correctness or security) within three lines of a
-   higher-ranked one is dropped. See
+   higher-ranked one is dropped, and each drop is logged with the finding and
+   the lens that outranked it. See
    [When Lenses Disagree](what-gets-reviewed.md#when-lenses-disagree).
 
-9. **filter**: findings below `min_severity` are dropped, then any
-   `finding_rules` (drop or re-grade by path, lens, title or severity) apply.
+10. **filter**: findings below `min_severity` are dropped, then any
+    `finding_rules` (drop or re-grade by path, lens, title or severity) apply.
 
-10. **post**: findings are posted as one batched review on GitHub (per-host
+11. **post**: findings are posted as one batched review on GitHub (per-host
     differences are in [What gets reviewed](what-gets-reviewed.md#how-each-host-posts)).
     A hidden marker identifies lgtmaybe's summary: a re-run at the same commit
     edits it in place, and a completed review at a new commit posts a fresh

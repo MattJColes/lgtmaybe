@@ -419,7 +419,9 @@ author two contradictory things, so lgtmaybe stops it at four points:
 3. **Reflection referees.** The self-reflection pass sees every finding at once
    and, when two give opposite advice about the same code, keeps the one higher
    on the ladder: correctness, security, performance, tests, complexity,
-   ponytail. That is Ponytail 5's own review order, with leanness last.
+   ponytail. That is Ponytail 5's own review order (correctness, safety, load,
+   tests, speed, leanness) mapped onto these lenses. A finding whose lens is not
+   on the ladder, such as a custom or pack lens, is never arbitrated.
 4. **A deterministic backstop.** After reflection (and even with `--no-reflect`),
    `engine/conflicts.py` drops a lower-ranked finding that sits within three
    lines of a higher-ranked one from a lens pair declared opposed, today ponytail

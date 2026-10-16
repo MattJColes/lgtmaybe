@@ -186,7 +186,7 @@ override and keep-all audit-error fallback SHALL remain unchanged.
 ### Requirement: Opposing advice is arbitrated, never posted together
 
 Two findings that give opposite advice about the same code SHALL NOT both post.
-Reflection keeps the higher-ranked of two opposite recommendations; a
+Reflection keeps the higher-ranked of two opposite recommendations from ranked lenses; a
 deterministic backstop (`resolve_conflicts`) then drops a finding from a
 declared-opposed lens pair within `NEAR_LINES` of a higher-ranked one. Both rank
 by `PRECEDENCE`, Ponytail 5's review order with leanness last.

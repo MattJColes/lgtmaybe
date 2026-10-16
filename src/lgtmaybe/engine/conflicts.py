@@ -9,9 +9,10 @@ Reflection audits every merged finding in one call and is told to arbitrate
 (``reflect.py``); this module is the deterministic referee behind it, so the
 guarantee also holds under ``--no-reflect`` and can be tested without a model.
 
-The precedence ladder is Ponytail 5's own review order — correctness, then
-safety, then load, then tests, then readability, then leanness — so the lens
-that cuts code always yields to the one that fixes it. Only pairs declared in
+The precedence ladder is :data:`PRECEDENCE` — correctness, security,
+performance, tests, complexity, ponytail — taken from Ponytail 5's review order
+(correctness, safety, load, tests, speed, leanness), so the lens that cuts code
+always yields to the one that fixes it. Only pairs declared in
 :data:`OPPOSED` are ever arbitrated: a group id, an unattributed finding, a
 custom or pack lens, or a scanner hit declares no opposition, and the backstop
 never guesses one.
@@ -70,8 +71,23 @@ def resolve_conflicts(findings: list[ReviewFinding]) -> list[ReviewFinding]:
     Order is preserved. Judged against the input set, so the result never
     depends on which finding came first.
     """
-    kept = [f for f in findings if not any(_outranked_by(f, other) for other in findings)]
-    dropped = len(findings) - len(kept)
-    if dropped:
-        _log.info("dropped opposing advice", extra={"dropped": dropped})
+    kept: list[ReviewFinding] = []
+    for finding in findings:
+        winner = next((other for other in findings if _outranked_by(finding, other)), None)
+        if winner is None:
+            kept.append(finding)
+            continue
+        # Named, not counted: an operator asking why a finding vanished needs
+        # the finding and the lens that outranked it to check the call.
+        _log.info(
+            "dropped opposing advice",
+            extra={
+                "path": finding.path,
+                "line": finding.line,
+                "category": finding.category,
+                "title": finding.title,
+                "outranked_by": winner.category,
+                "winner_line": winner.line,
+            },
+        )
     return kept

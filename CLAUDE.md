@@ -572,11 +572,12 @@ pattern, event bus, plugin framework.
      collapses an existing boundary; complexity extracts duplication only for
      uniform callers; `pack:design`'s shallow-module spares port
      implementations); (3) **reflection referees** — it sees every merged
-     finding, and keeps the higher-ranked of two opposite recommendations;
+     finding, and keeps the higher-ranked of two opposite recommendations
+     (only when both lenses are on the ladder; otherwise it keeps both);
      (4) `engine/conflicts.resolve_conflicts`, the **deterministic backstop**
      after reflection (so it holds under `--no-reflect`): a finding from a
      pair in `OPPOSED` within `NEAR_LINES` of a higher-`PRECEDENCE` one is
-     dropped and logged. `PRECEDENCE` is Ponytail 5's `/ponytail-review` order
+     dropped, logged with the loser and the lens that outranked it. `PRECEDENCE` is Ponytail 5's `/ponytail-review` order
      (correctness → security → performance → tests → complexity → ponytail)
      and is rendered into the reflection prompt, so both referees rank alike.
      Only declared pairs are arbitrated — group ids, unattributed, custom/pack

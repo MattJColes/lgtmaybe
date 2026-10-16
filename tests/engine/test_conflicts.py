@@ -115,3 +115,21 @@ def test_order_is_preserved_and_unrelated_findings_untouched() -> None:
 
 def test_no_findings() -> None:
     assert resolve_conflicts([]) == []
+
+
+def test_each_drop_names_the_loser_and_the_winner(caplog: pytest.LogCaptureFixture) -> None:
+    """A count can't tell an operator which finding vanished or why; each drop logs
+    the losing finding and the lens that outranked it."""
+    keep = _finding(ReviewCategory.security, line=10)
+    cut = _finding(ReviewCategory.ponytail, line=11)
+
+    with caplog.at_level("INFO", logger="lgtmaybe.engine.conflicts"):
+        resolve_conflicts([keep, cut])
+
+    (record,) = [r for r in caplog.records if r.getMessage() == "dropped opposing advice"]
+    assert record.path == "a.py"  # type: ignore[attr-defined]
+    assert record.line == 11  # type: ignore[attr-defined]
+    assert record.category == "ponytail"  # type: ignore[attr-defined]
+    assert record.title == cut.title  # type: ignore[attr-defined]
+    assert record.outranked_by == "security"  # type: ignore[attr-defined]
+    assert record.winner_line == 10  # type: ignore[attr-defined]
