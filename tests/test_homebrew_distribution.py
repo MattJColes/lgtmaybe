@@ -127,6 +127,6 @@ def test_formula_generator_waits_for_the_simple_index() -> None:
     # pip asks for a revalidated page; poll the same way, or a cached page can
     # read as ready (or stale) differently from what pip then gets.
     assert "Cache-Control: max-age=0" in script
-    assert 'lgtmaybe-${VERSION}.tar.gz' in script
+    assert "lgtmaybe-${VERSION}.tar.gz" in script
     # The wait happens before the formula is written, inside the polling loop.
     assert script.index("pypi.org/simple/lgtmaybe/") < script.index('cat > "$OUT"')
