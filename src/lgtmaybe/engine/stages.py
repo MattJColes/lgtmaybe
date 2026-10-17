@@ -369,9 +369,8 @@ def lens_ceilings(cfg: ReviewConfig) -> tuple[float | None, int | None]:
     # Lens calls stop EARLY, leaving the tail of each ceiling for the
     # auditor. Reflection prunes a bad review, so if the lens fan-out spends
     # the budget down to zero the audit is skipped exactly when it is most
-    # needed: measured, a runaway lens call consumed the whole deadline and
-    # 325 unaudited findings posted, 323 of them false positives on a diff
-    # with nothing wrong in it. A tenth of the budget covers one audit call
+    # needed (measured: docs/explanation/recovery-evidence.md, "The
+    # Reflection Reserve"). A tenth of the budget covers one audit call
     # and is a small amount to forgo when nothing overruns. The cap bounds
     # the reserve on a long ceiling, and reserving a proportion rather than a
     # fixed number of seconds means a deliberately small ceiling does not

@@ -116,37 +116,25 @@ _log = get_logger(__name__)
 # - Six everywhere. An extra worker can cut a full-latency wave off the
 #   wall clock (only when it changes how many waves there are — wall time is
 #   ceil(batches × lenses / workers)), so the pull is upward — but the fan-out
-#   is one API key, and the
-#   gateways that meter a key meter it per minute, so past some width the burst
-#   rate-limits ITSELF. It did: eight concurrent calls against one OpenRouter key
-#   produced three consecutive reviews reporting "1 of 4 review calls failed" on
-#   a 429. The adapter's backoff (now long enough to outlast a rate window) and
-#   the rescue wave both make that survivable rather than fatal; six is the same
-#   fix from the other end — a quarter less burst for a quarter less parallelism.
-#   Teams on a high rate tier can raise it with `max_concurrency`.
-# - Local providers used to get
-#   1, on the reasoning that a local server processes one request at a time so a
-#   wider pool would only queue. The queueing is real, but the conclusion was
-#   wrong in both directions: a server that CAN batch was capped at 1 for no
-#   reason, and a server that cannot loses nothing by having work queued for it —
-#   ollama queues (up to OLLAMA_MAX_QUEUE, 512) rather than failing, so the wall
-#   clock is the server's throughput either way.
-#
-#   The knob that actually decides local throughput is on the SERVER, not here:
-#   `OLLAMA_NUM_PARALLEL` (1 by default), llama.cpp's `-np`, vLLM's batching.
-#   Raising those costs memory in proportion — ollama allocates context per
-#   parallel slot, and llama.cpp splits one KV cache across slots, so `-c 32768
-#   -np 4` leaves each slot 8k, well under a single review prompt. vLLM is the
-#   exception: it batches and keeps full `--max-model-len` per request.
+#   is one API key, and the gateways that meter a key meter it per minute, so
+#   past some width the burst rate-limits ITSELF. Six is a quarter less burst
+#   for a quarter less parallelism. Teams on a high rate tier can raise it with
+#   `max_concurrency`.
+# - Local providers get the same six: a server that cannot batch loses nothing
+#   by having work queued for it (ollama queues rather than failing), and one
+#   that can is not capped for no reason. The knob that actually decides local
+#   throughput is on the SERVER, not here (`OLLAMA_NUM_PARALLEL`, llama.cpp's
+#   `-np`, vLLM's batching, and their memory cost: docs/how-to/run-locally.md,
+#   "Concurrency on a Local Server").
 #
 #   The one case for lowering this back to 1 is a very slow local model, where
 #   six queued calls could each wait out the per-request timeout — and the local
 #   per-call default is scaled by this width precisely so that they do not.
 #
 # There is deliberately no per-provider exception list. If one is ever needed
-# again, keep it a value a reader can see next to the branch that reads it: the
-# last one was a named-but-empty set two hundred lines away, which read as a
-# policy it no longer had.
+# again, keep it a value a reader can see next to the branch that reads it.
+# Why, and the incidents behind six: docs/explanation/recovery-evidence.md,
+# "The Concurrency Default".
 _DEFAULT_MAX_WORKERS = 6
 # The fast preset's `code-health` group id is gated too: a finding stamped with
 # it carried no member category, so it cannot prove it is one of the exempt
@@ -583,11 +571,10 @@ class LLMReviewEngine:
             # Overrunning a ceiling is NOT a reason to skip the audit. The lens
             # fan-out already stops short of both ceilings (`lens_deadline_at` /
             # `lens_budget_at`) to leave the auditor room, and a review that
-            # overran still needs pruning: measured, a runaway lens call passed
-            # the deadline and 325 unaudited findings posted, 323 of them false
-            # positives on a diff with nothing wrong in it. Reflection is a
-            # single bounded call, so running it past the ceiling is cheaper than
-            # posting that many unaudited findings.
+            # overran still needs pruning most of all. Reflection is a single
+            # bounded call, so running it past the ceiling is cheaper than
+            # posting a runaway's findings unaudited (measured:
+            # docs/explanation/recovery-evidence.md, "The Reflection Reserve").
             #
             # A termination signal is the only exception: the process is being
             # torn down on someone else's clock, so there is no budget to reserve.
