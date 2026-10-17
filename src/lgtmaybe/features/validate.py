@@ -14,11 +14,10 @@ from lgtmaybe.core.models import (
     ReviewConfig,
 )
 from lgtmaybe.core.ports import ProviderClient
-
-from .injection import wrap_validation
-from .parse import parse_structured
-from .profiling import timed_complete
-from .redact import redact
+from lgtmaybe.engine.injection import wrap_validation
+from lgtmaybe.engine.parse import parse_structured
+from lgtmaybe.engine.profiling import timed_complete
+from lgtmaybe.engine.redact import redact
 
 _log = get_logger(__name__)
 

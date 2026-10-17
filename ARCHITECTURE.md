@@ -83,6 +83,14 @@ lgtmaybe/
 │   │   ├── reflect.py       #   self-reflection pass that drops low-confidence findings
 │   │   └── conflicts.py     #   drops a finding whose advice opposes a higher-ranked one
 │   │
+│   ├── features/            # what we post beside the review; imports engine/, never the reverse
+│   │   ├── describe.py      #   PR description + the one-call scaffold the others share
+│   │   ├── diagram.py       #   change diagrams (structure and sequence)
+│   │   ├── high_impact.py   #   the overview's High Impact Areas section
+│   │   ├── overview.py      #   the change overview comment that composes them
+│   │   ├── labels.py        #   review-effort, security, splitting and risk labels
+│   │   └── validate.py      #   follow-up validation of earlier findings at a new head
+│   │
 │   ├── providers/           # LLM adapter (the ProviderClient side)
 │   │   ├── litellm_provider.py  # litellm wrapper: retries (tenacity) + fallback
 │   │   ├── factory.py       #   (Provider, model) → configured client; timeouts; model strings
@@ -204,6 +212,12 @@ an overrunning review to partial-with-a-notice, and every stage and model call
 is timed (`--profile` prints the breakdown). It fails loud
 (`ReviewIncompleteError`) rather than report a false "clean" when every model
 call fails.
+
+**Features (`features/`)**: the comments and labels posted beside the review.
+Each has its own model call or its own derived output, and the review pipeline
+needs none of them. Imports go one way: a feature may use the engine's public
+helpers (redaction, injection wrappers, the parser, the risk verdict), and no
+engine module imports `features/` (`tests/test_code_quality.py` holds that line).
 
 **Provider adapter (`providers/`)** — strategy + factory over litellm, with the
 credential chain of responsibility and a provider-aware timeout (ollama gets a

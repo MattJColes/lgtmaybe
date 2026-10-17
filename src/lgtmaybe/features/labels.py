@@ -23,30 +23,13 @@ from lgtmaybe.core.diffparse import changed_line_count
 from lgtmaybe.core.models import (
     EFFORT_PREFIX,
     RISK_PREFIX,
-    SCAN_CATEGORY_PREFIX,
     SECURITY_LABEL,
     SPLITTING_LABEL,
     PRContext,
-    ReviewCategory,
     ReviewFinding,
     Severity,
-    StaticAnalysisTool,
 )
-
-# Scanner categories whose findings are security findings by nature. Listed
-# rather than inferred: a type checker or a linter also carries a `scan:`
-# category, and a mypy error is not a security issue.
-_SECURITY_SCAN_CATEGORIES: frozenset[str] = frozenset(
-    f"{SCAN_CATEGORY_PREFIX}{tool.value}"
-    for tool in (
-        StaticAnalysisTool.gitleaks,
-        StaticAnalysisTool.bandit,
-        StaticAnalysisTool.semgrep,
-        # Workflow template injection and known-vulnerable dependencies.
-        StaticAnalysisTool.zizmor,
-        StaticAnalysisTool.osv_scanner,
-    )
-)
+from lgtmaybe.engine.suppress import is_security_finding
 
 # Changed-line thresholds for effort scores 2..5 (score 1 = below the first).
 _EFFORT_THRESHOLDS = (50, 200, 500, 1000)
@@ -56,17 +39,6 @@ _EFFORT_THRESHOLDS = (50, 200, 500, 1000)
 # — a wrong split hint is pure noise.
 _MIN_SPRAWL_DIRS = 4
 _MIN_SPRAWL_FILES = 10
-
-
-def is_security_finding(finding: ReviewFinding) -> bool:
-    """Whether *finding* is a security finding, from the lens or from a scanner.
-
-    A secret scanner's finding is the most label-worthy thing this reviewer
-    produces, and it never carries the literal ``security`` lens category — so
-    matching on that alone silently skipped exactly the case the label is for.
-    """
-    category = finding.category or ""
-    return category == ReviewCategory.security.value or category in _SECURITY_SCAN_CATEGORIES
 
 
 def compute_labels(findings: list[ReviewFinding], ctx: PRContext) -> list[str]:

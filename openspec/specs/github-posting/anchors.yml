@@ -64,7 +64,7 @@ github.resolve-fixed:
   - rule:
       kind: function_definition
       has: { field: name, regex: '^validate_findings$' }
-    files: [src/lgtmaybe/engine/**/*.py]
+    files: [src/lgtmaybe/features/**/*.py]
 
 github.feedback:
   rule:
@@ -92,7 +92,7 @@ github.labels:
   - rule:
       kind: function_definition
       has: { field: name, regex: '^compute_labels$' }
-    files: [src/lgtmaybe/engine/**/*.py]
+    files: [src/lgtmaybe/features/**/*.py]
   - rule:
       kind: function_definition
       has: { field: name, regex: '^apply_pr_labels$' }

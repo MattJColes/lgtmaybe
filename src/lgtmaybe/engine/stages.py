@@ -215,7 +215,7 @@ def _resolve_spec(cfg: ReviewConfig, ctx: PRContext, root: Path) -> _SpecContext
         bundles,
         changed_files=ctx.changed_files,
         branch=ctx.head_branch,
-        intent_text=_intent_text(ctx),
+        intent_text=stated_intent(ctx),
     )
     if not selected:
         return skipped
@@ -245,7 +245,7 @@ def _resolve_spec(cfg: ReviewConfig, ctx: PRContext, root: Path) -> _SpecContext
     return _SpecContext(redact(text), unfit)
 
 
-def _intent_text(ctx: PRContext) -> str:
+def stated_intent(ctx: PRContext) -> str:
     """The PR's stated intent as one labelled text block, or "" when none is stated.
 
     Title + description come from a GitHub PR; commit names (first lines) come
@@ -404,7 +404,7 @@ def redact_inputs(ctx: PRContext) -> RedactedInputs:
         #
         #     Only REDACTED here; the wrapping happens per batch, because the
         #     block also has to name the files that batch cannot see.
-        intent_text = _intent_text(ctx)
+        intent_text = stated_intent(ctx)
         clean_intent = redact(intent_text) if intent_text else None
     return RedactedInputs(clean_diff, clean_intent)
 

@@ -22,7 +22,7 @@ import json
 import zlib
 
 from lgtmaybe.core.models import DiagramResult, PRContext, Provider, ProviderResult, ReviewConfig
-from lgtmaybe.engine.diagram import build_diagram
+from lgtmaybe.features.diagram import build_diagram
 from tests.fakes import FakeProvider
 
 _CTX = PRContext(
@@ -459,7 +459,7 @@ def test_summary_prompt_demands_concise_message_shape() -> None:
 def test_no_language_directive_by_default() -> None:
     """Unset language ⇒ the diagram system prompt is byte-identical to the
     module constant (no directive added)."""
-    from lgtmaybe.engine.diagram import _DIAGRAM_SYSTEM
+    from lgtmaybe.features.diagram import _DIAGRAM_SYSTEM
 
     provider = _structured_provider()
     build_diagram(_CTX, _CFG, provider)
@@ -504,7 +504,7 @@ def test_diff_block_uses_injections_delimiter_constants() -> None:
 def test_diagram_result_returns_the_typed_graph() -> None:
     """The change overview lays out its own sections, so it takes the parsed
     graph rather than the diagram's standalone Markdown body."""
-    from lgtmaybe.engine.diagram import diagram_result
+    from lgtmaybe.features.diagram import diagram_result
 
     diagram = diagram_result(_CTX, _CFG, _sequence_provider())
 
@@ -513,7 +513,7 @@ def test_diagram_result_returns_the_typed_graph() -> None:
 
 
 def test_diagram_result_is_none_when_nothing_parses() -> None:
-    from lgtmaybe.engine.diagram import diagram_result
+    from lgtmaybe.features.diagram import diagram_result
 
     provider = FakeProvider(
         result=ProviderResult(text="Just prose, no JSON.", input_tokens=1, output_tokens=1)
@@ -526,7 +526,7 @@ def test_rendered_views_carry_no_title_and_can_be_force_headed() -> None:
     """Inside the overview the description heads the comment and other
     sections sit above the diagrams, so the views always announce themselves —
     even when there is only a flowchart to show."""
-    from lgtmaybe.engine.diagram import diagram_result, render_diagram_views
+    from lgtmaybe.features.diagram import diagram_result, render_diagram_views
 
     diagram = diagram_result(_CTX, _CFG, _graph_provider())
     assert diagram is not None
@@ -541,6 +541,6 @@ def test_rendered_views_carry_no_title_and_can_be_force_headed() -> None:
 
 def test_rendered_views_are_none_without_a_graph() -> None:
     from lgtmaybe.core.models import DiagramResult as _DR
-    from lgtmaybe.engine.diagram import render_diagram_views
+    from lgtmaybe.features.diagram import render_diagram_views
 
     assert render_diagram_views(_DR(title="t", nodes=[]), headed=True) is None

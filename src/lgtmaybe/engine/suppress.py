@@ -22,13 +22,45 @@ from __future__ import annotations
 import re
 
 from lgtmaybe.core.findings import finding_fingerprint
-from lgtmaybe.core.models import ReviewConfig, ReviewFinding, Severity
-
-from .labels import is_security_finding
+from lgtmaybe.core.models import (
+    SCAN_CATEGORY_PREFIX,
+    ReviewCategory,
+    ReviewConfig,
+    ReviewFinding,
+    Severity,
+    StaticAnalysisTool,
+)
 
 # A `# lgtmaybe: ignore` pragma anywhere in a line (after a `#` comment marker).
 # Case-insensitive so `# LGTMAYBE: IGNORE` works too.
 _PRAGMA = re.compile(r"#\s*lgtmaybe:\s*ignore\b", re.IGNORECASE)
+
+
+# Scanner categories whose findings are security findings by nature. Listed
+# rather than inferred: a type checker or a linter also carries a `scan:`
+# category, and a mypy error is not a security issue.
+_SECURITY_SCAN_CATEGORIES: frozenset[str] = frozenset(
+    f"{SCAN_CATEGORY_PREFIX}{tool.value}"
+    for tool in (
+        StaticAnalysisTool.gitleaks,
+        StaticAnalysisTool.bandit,
+        StaticAnalysisTool.semgrep,
+        # Workflow template injection and known-vulnerable dependencies.
+        StaticAnalysisTool.zizmor,
+        StaticAnalysisTool.osv_scanner,
+    )
+)
+
+
+def is_security_finding(finding: ReviewFinding) -> bool:
+    """Whether *finding* is a security finding, from the lens or from a scanner.
+
+    A secret scanner's finding is the most label-worthy thing this reviewer
+    produces, and it never carries the literal ``security`` lens category — so
+    matching on that alone silently skipped exactly the case the label is for.
+    """
+    category = finding.category or ""
+    return category == ReviewCategory.security.value or category in _SECURITY_SCAN_CATEGORIES
 
 
 def _is_protected_security(finding: ReviewFinding) -> bool:

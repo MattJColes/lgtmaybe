@@ -580,7 +580,7 @@ def execute_local_diagram(
     a terminal — with the comment's collapsible wrappers flattened, since a
     terminal renders no HTML.
     """
-    from lgtmaybe.engine.overview import build_overview
+    from lgtmaybe.features.overview import build_overview
 
     ctx = _local_context(base=base, working=working, uncommitted=uncommitted)
     try:

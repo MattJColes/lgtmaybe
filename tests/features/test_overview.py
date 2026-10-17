@@ -38,8 +38,8 @@ from lgtmaybe.core.models import (
     RiskReason,
 )
 from lgtmaybe.core.ports import Message
-from lgtmaybe.engine.diagram import build_diagram
-from lgtmaybe.engine.overview import build_overview
+from lgtmaybe.features.diagram import build_diagram
+from lgtmaybe.features.overview import build_overview
 from tests.fakes import FakeProvider
 
 _CTX = PRContext(
@@ -266,7 +266,7 @@ class TestRisk:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The review assessed the whole PR; the overview must agree with it."""
-        import lgtmaybe.engine.overview as overview
+        import lgtmaybe.features.overview as overview
 
         def boom(*_a: object, **_k: object) -> RiskAssessment:
             raise AssertionError("re-assessed a context that already carried a verdict")

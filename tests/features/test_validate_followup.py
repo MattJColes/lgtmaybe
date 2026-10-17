@@ -8,7 +8,7 @@ from lgtmaybe.core.models import (
     PRContext,
     ProviderResult,
 )
-from lgtmaybe.engine.validate import validate_findings
+from lgtmaybe.features.validate import validate_findings
 from tests.conftest import make_cfg
 from tests.fakes import FakeProvider
 
@@ -127,7 +127,7 @@ def test_validate_findings_rejects_oversized_input_before_building_the_prompt(
     provider = FakeProvider()
     ctx = CTX.model_copy(update={"diff": "x" * 100})
     monkeypatch.setattr(
-        "lgtmaybe.engine.validate._context",
+        "lgtmaybe.features.validate._context",
         lambda findings, ctx: (_ for _ in ()).throw(AssertionError("context was built")),
     )
 

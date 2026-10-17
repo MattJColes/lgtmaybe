@@ -29,9 +29,9 @@ from typing import Any, NamedTuple
 
 from lgtmaybe.core.models import DiagramResult, PRContext, ReviewConfig
 from lgtmaybe.core.ports import ProviderClient
+from lgtmaybe.engine.prompt import PLAIN_LANGUAGE, language_directive
 
 from .describe import markdown_text, single_line, structured_call
-from .prompt import PLAIN_LANGUAGE, language_directive
 
 _DIAGRAM_SYSTEM = (
     """\

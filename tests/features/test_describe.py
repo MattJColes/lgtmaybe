@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 
 from lgtmaybe.core.models import PRContext, Provider, ProviderResult, ReviewConfig
-from lgtmaybe.engine.describe import build_description
+from lgtmaybe.features.describe import build_description
 from tests.fakes import FakeProvider
 
 _CTX = PRContext(
@@ -158,7 +158,7 @@ def test_forged_markers_in_the_diff_are_neutralised() -> None:
 def test_no_language_directive_by_default() -> None:
     """Unset language ⇒ the describe system prompt is byte-identical to the
     module constant (no directive added)."""
-    from lgtmaybe.engine.describe import _DESCRIBE_SYSTEM
+    from lgtmaybe.features.describe import _DESCRIBE_SYSTEM
 
     provider = _structured_provider()
     build_description(_CTX, _CFG, provider)
@@ -178,7 +178,7 @@ def test_language_directive_added_when_set() -> None:
 def test_markdown_text_escapes_and_flattens_model_prose() -> None:
     """The escapers live here, beside the shared scaffold, because every
     overview section renders model-authored prose the same inert way."""
-    from lgtmaybe.engine.describe import markdown_text, single_line
+    from lgtmaybe.features.describe import markdown_text, single_line
 
     assert single_line("two  lines\nof text") == "two lines of text"
     assert markdown_text("[x](http://e)") == r"\[x\]\(http\://e\)"
@@ -187,7 +187,7 @@ def test_markdown_text_escapes_and_flattens_model_prose() -> None:
 def test_describe_result_returns_the_typed_object_and_intent_flag() -> None:
     """The overview lays out the sections itself, so it needs the parsed
     object rather than describe's own rendered Markdown."""
-    from lgtmaybe.engine.describe import describe_result
+    from lgtmaybe.features.describe import describe_result
 
     desc, has_intent = describe_result(_CTX, _CFG, _structured_provider())
 
@@ -197,7 +197,7 @@ def test_describe_result_returns_the_typed_object_and_intent_flag() -> None:
 
 
 def test_describe_result_is_none_when_nothing_parses() -> None:
-    from lgtmaybe.engine.describe import describe_result
+    from lgtmaybe.features.describe import describe_result
 
     provider = FakeProvider(
         result=ProviderResult(text="Just prose.", input_tokens=1, output_tokens=1)
@@ -216,7 +216,7 @@ class TestModelProseIsInert:
 
     def _described(self, **fields: str) -> str:
         from lgtmaybe.core.models import DescribeResult
-        from lgtmaybe.engine.describe import render_description
+        from lgtmaybe.features.describe import render_description
 
         base = {"title": "t", "change_type": "fix", "summary": "s", "intent_check": "i"}
         base.update(fields)
@@ -245,7 +245,7 @@ class TestModelProseIsInert:
 
     def test_a_walkthrough_cell_cannot_break_the_table(self) -> None:
         from lgtmaybe.core.models import DescribeResult, FileWalkthrough
-        from lgtmaybe.engine.describe import render_description
+        from lgtmaybe.features.describe import render_description
 
         body = render_description(
             DescribeResult(
