@@ -26,11 +26,11 @@ from lgtmaybe.core.models import DescribeResult, PRContext, ReviewConfig
 from lgtmaybe.core.ports import ProviderClient
 
 from .compress import count_tokens, take_lines
-from .engine import _intent_text  # same package; the one canonical intent extractor
 from .injection import DIFF_END, DIFF_START, neutralise, wrap_intent
 from .parse import parse_structured
 from .prompt import PLAIN_LANGUAGE, language_directive
 from .redact import redact
+from .stages import _intent_text  # same package; the one canonical intent extractor
 
 _M = TypeVar("_M", bound=BaseModel)
 

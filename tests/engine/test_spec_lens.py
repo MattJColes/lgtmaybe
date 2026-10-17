@@ -21,7 +21,7 @@ from lgtmaybe.core.models import (
     ReviewPreset,
 )
 from lgtmaybe.engine import LLMReviewEngine
-from lgtmaybe.engine.engine import _build_lenses
+from lgtmaybe.engine.lenses import _build_lenses
 from lgtmaybe.engine.redact import REDACTED_PLACEHOLDER
 from tests.fakes import FakeProvider
 

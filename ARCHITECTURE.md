@@ -69,6 +69,11 @@ lgtmaybe/
 │   │
 │   ├── engine/              # the review pipeline (adapter-agnostic)
 │   │   ├── engine.py        #   LLMReviewEngine — orchestrates every stage
+│   │   ├── stages.py        #   the preparation stages, one function each (redact → batch)
+│   │   ├── lenses.py        #   the lens set one review fans out over
+│   │   ├── run.py           #   per-run settings, state and ceilings every call shares
+│   │   ├── recovery.py      #   the truncation ladder and the rescue wave
+│   │   ├── notices.py       #   the summary's notices, summary line and hidden markers
 │   │   ├── redact.py        #   scrub secrets from the diff before egress
 │   │   ├── injection.py     #   prompt-injection defense + delimiter break-out guard
 │   │   ├── compress.py      #   token-aware batching + hunk context expansion

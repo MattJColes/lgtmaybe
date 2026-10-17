@@ -123,11 +123,11 @@ def _isolate_installed_analyzers(monkeypatch: pytest.MonkeyPatch) -> None:
     Static analysis is on by default, so every review would otherwise spawn
     whatever ruff / mypy / semgrep sits on PATH and feed its hints into the
     prompt the test asserts on. The engine's runner returns nothing here; a test
-    about static analysis patches ``lgtmaybe.engine.engine.run_static_analysis``
+    about static analysis patches ``lgtmaybe.engine.stages.run_static_analysis``
     itself, and ``tests/engine/test_static_analysis.py`` calls the real runner
     directly.
     """
-    monkeypatch.setattr("lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [])
+    monkeypatch.setattr("lgtmaybe.engine.stages.run_static_analysis", lambda files, cfg: [])
 
 
 @pytest.fixture(autouse=True)

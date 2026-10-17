@@ -4,111 +4,112 @@ Pipeline: redact → compress/batch → (per batch) fan out one call per review
          lens (concurrent for cloud, serial for ollama) → parse → merge/dedupe
          → require defect evidence → self-reflect/filter → filter by min_severity
          → return findings + summary.
+
+This module orchestrates. The stages it runs live beside it: the preparation
+stages in ``stages.py``, the lens set in ``lenses.py``, the per-run types and
+ceilings in ``run.py``, the recovery ladder in ``recovery.py``, and the summary
+notices in ``notices.py``.
 """
 
 from __future__ import annotations
 
-import hashlib
-import logging
-import threading
 import time
 from collections import Counter
 from collections.abc import Callable, Collection, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
-from dataclasses import dataclass, field, replace
-from fnmatch import fnmatchcase
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import Any, NamedTuple, Protocol
+from typing import Any
 
-from lgtmaybe.core.comment import code_span
-from lgtmaybe.core.diff import is_reviewable
-from lgtmaybe.core.diffparse import changed_line_index, split_by_file
+from lgtmaybe.core.diffparse import changed_line_index
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import (
     SCAN_CATEGORY_PREFIX,
     PRContext,
-    ProviderResult,
-    PRStack,
     ReviewCategory,
     ReviewConfig,
     ReviewFinding,
-    ReviewPreset,
     ReviewResult,
     RiskAssessment,
-    StackLayer,
-    StaticAnalysisTool,
-    ToolMode,
-    is_unrecoverable,
-    schema_dropped_on,
-    temperature_dropped_on,
 )
-from lgtmaybe.core.ports import (
-    Message,
-    ProviderClient,
-    ProviderInputTooLarge,
-    ProviderTruncated,
-    ProviderWallTimeout,
-    SupportsRecovery,
-)
-from lgtmaybe.core.version import package_version
+from lgtmaybe.core.ports import Message, ProviderClient, SupportsRecovery
 
-from . import specs
 from .astgrep import SymbolResolver
-from .boundaries import definition_spans
-from .compress import (
-    batch_files,
-    context_lines_for_budget,
-    count_tokens,
-    expand_hunks,
-    split_hunk_by_budget,
-    split_patch_into_hunks,
-    trailing_context_lines,
-)
+from .compress import count_tokens
 from .conflicts import resolve_conflicts
-from .directory import build_directory_block, load_context_files, rules_for
-from .injection import (
-    wrap_context,
-    wrap_diff,
-    wrap_hints,
-    wrap_intent,
-    wrap_not_shown,
-    wrap_spec,
-    wrap_stack,
+from .injection import wrap_context, wrap_diff, wrap_not_shown, wrap_stack
+from .lenses import _build_lenses, _Lens
+from .notices import (
+    _SCHEMA_DROP_NOTE,
+    INCOMPLETE_MARKER,
+    LENSES_MARKER_PREFIX,
+    _build_notices,
+    _compose_summary,
+    _NoticeState,
+    _summary_line,
 )
 from .parse import ParseError, parse_findings, parse_needs
 from .profiling import profiler
-from .prompt import (
-    CODE_HEALTH_GROUP,
-    FAST_GROUPS,
-    build_correctness_block,
-    build_custom_lens_block,
-    build_group_block,
-    build_lens_block,
-    build_shared_preamble,
-    project_context,
-)
-from .redact import redact
+from .prompt import CODE_HEALTH_GROUP, build_shared_preamble, project_context
+from .recovery import _Ladder, _rescue
 from .reflect import reflect_findings
-from .repair import repair_findings
 from .retrieve import MAX_FETCH_FILES, FileFetcher, resolve_needs
-from .risk import assess_risk, risk_marker, risk_segment
-from .selftalk import drop_self_talk
-from .severity import clamp_to_category_ceiling
-from .static_analysis import (
-    MAX_SCAN_FINDINGS,
-    UNANCHORABLE_SCAN_CATEGORIES,
-    ToolFinding,
-    format_hints,
-    mode_for,
-    partition_by_mode,
-    run_static_analysis,
-    tool_review_findings,
+from .risk import assess_risk
+from .rules import apply_finding_rules
+from .run import (
+    _BlocksFor,
+    _LensOutcome,
+    _MeteredProvider,
+    _OnOversized,
+    _PreparedCall,
+    _Run,
+    _RunState,
+    _skip_reason,
+    _stamp_and_bound,
+    clear_interrupt,
+    interrupt_requested,
+    request_interrupt,
 )
+from .stages import (
+    UnbatchedHints,
+    _redacted_stack,
+    batch_patches,
+    blocks_builder,
+    cap_files,
+    carry_unbatched_hints,
+    directory_context,
+    expand_context,
+    files_not_visible,
+    filter_files,
+    lens_ceilings,
+    passes_path_filters,
+    redact_inputs,
+    retrieval_budget,
+    scan_files,
+    spec_context,
+    triage_patches,
+)
+from .static_analysis import MAX_SCAN_FINDINGS, UNANCHORABLE_SCAN_CATEGORIES, ToolFinding
 from .suppress import apply_suppressions
-from .triage import triage_files
+
+# The public surface, including the names that moved out of this module when
+# the engine was split and are still imported from here.
+__all__ = [
+    "INCOMPLETE_MARKER",
+    "LENSES_MARKER_PREFIX",
+    "LLMReviewEngine",
+    "ReviewIncompleteError",
+    "clear_interrupt",
+    "concurrency_cap",
+    "files_not_visible",
+    "interrupt_requested",
+    "passes_path_filters",
+    "request_interrupt",
+]
 
 _log = get_logger(__name__)
+
 
 # Auto concurrency (cfg.max_concurrency=None) — one number, every provider:
 #
@@ -181,331 +182,6 @@ _FAILURE_SCENARIO_CATEGORIES: frozenset[str] = frozenset(
 # adapter's route list, drifting from it every time a backend adds caching.
 _WARMUP_MIN_TOKENS = 2048
 
-# Hidden flag on the summary of a run that did not complete every lens call —
-# a failed call, or one skipped past the max_review_seconds deadline (which
-# reports itself as a failed call). Invisible in rendered Markdown, so it costs
-# the review body nothing, and machine-readable, so the posting step can make
-# the incompleteness *visible on the PR* rather than leaving it in a body edit
-# nobody is notified about (see review.run_review). Its own marker family:
-# deliberately disjoint from the summary/finding/reviewed markers the GitHub
-# adapter matches on.
-INCOMPLETE_MARKER = "<!-- lgtmaybe-incomplete -->"
-
-# Which lenses completed every call they were given, stamped into the summary as
-# a hidden comma-separated list (`<!-- lgtmaybe-lenses:artefacts,code-health,… -->`).
-# A posting gate that wants "every lens ran" can require the set it expects
-# rather than infer completeness from the ABSENCE of a failure notice — a lens
-# that never ran leaves no notice to find. Its own marker family, disjoint from
-# the summary/finding/reviewed/incomplete markers, like the one above.
-LENSES_MARKER_PREFIX = "<!-- lgtmaybe-lenses:"
-
-# The reason string a call skipped by the token ceiling reports. Shared with the
-# summary step, which counts these to tell a budget stop (spend the user chose)
-# apart from the provider failures the generic incomplete notice covers.
-_BUDGET_SKIP_REASON = "token budget (max_review_tokens) reached: call skipped"
-
-# Share of `max_review_seconds` / `max_review_tokens` held back from the lens
-# fan-out so the reflection auditor still runs on a review that overruns, and the
-# ceiling on the time half of that reserve.
-_REFLECT_RESERVE = 0.1
-_MAX_REFLECT_RESERVE_S = 300.0
-
-# When reasoning accounts for at least this share of the `max_tokens` ceiling a
-# truncation hit, the ceiling was spent on THINKING, not on findings — and the
-# split (see _review_split) cannot help, because a smaller payload does not
-# shrink a thinking budget.
-#
-# 0.9 because the two populations are nowhere near it from either side. Measured
-# on one self-review of this repo: five calls truncated at a 32,768 ceiling
-# having spent 25,963–35,463 tokens reasoning — 0.79 to over 1.0 of the cap,
-# clustering at 0.98+ — while the calls that answered normally wrote thousands of
-# tokens of findings after their thinking. The failure mode the split exists for
-# is the opposite shape: little thought, then an answer that runs long, where the
-# ratio is near zero. At 0.9 at most a tenth of the ceiling was left for the
-# answer, so halving the diff cannot buy a complete one — the only lever left is
-# `reasoning_effort`, which bounds the thinking directly.
-#
-# Deliberately not configurable: it is a diagnosis, not a preference, and a knob
-# here would be one more thing to tune in the failure it exists to explain.
-_REASONING_DOMINANT_SHARE = 0.9
-
-# The reason string a call skipped by an interruption reports. Worded to name
-# the cause, because the remedy differs from the deadline's: nobody should go
-# hunting for a `max_review_seconds` they never hit.
-_INTERRUPT_SKIP_REASON = "review interrupted (termination signal): call skipped"
-
-# A wind-down asked for from OUTSIDE the pipeline — in practice the CLI's
-# SIGTERM/SIGINT handler, when the CI job blows its `timeout-minutes` or a push
-# cancels the run. Deliberately the same state the elapsed deadline sets: queued
-# model calls are skipped, in-flight ones finish, and the review posts partial
-# results with a notice instead of dying with nothing on the PR. Process-global
-# and never cleared by `review()` — a signal means stop, not stop-for-one-review
-# — so the CLI's other steps wind down too. `Event` because the fan-out reads it
-# from every worker thread.
-_interrupted = threading.Event()
-
-
-def request_interrupt() -> None:
-    """Stop starting new model calls; post what the review already has."""
-    _interrupted.set()
-
-
-def interrupt_requested() -> bool:
-    """Whether a wind-down has been asked for."""
-    return _interrupted.is_set()
-
-
-def clear_interrupt() -> None:
-    """Forget a requested wind-down (tests, and a long-lived host process)."""
-    _interrupted.clear()
-
-
-def _plural(n: int, one: str = "", many: str = "s") -> str:
-    """The word (or suffix) for a count of *n*: *one* when it is exactly 1, else *many*."""
-    return one if n == 1 else many
-
-
-@dataclass(frozen=True)
-class _NoticeState:
-    cfg: ReviewConfig
-    capped_files: bool
-    total_files: int
-    oversized: list[str]
-    skipped_by_triage: list[str]
-    errors: list[str]
-    total_calls: int
-    failed_calls: int
-    failed_lenses: list[str]
-    split_batches: int
-    stepped_down: list[str]
-    escalated: dict[str, str]
-    repaired: list[str]
-    re_asked: list[str]
-    schema_dropped: bool
-    reflection_skipped: str | None
-    flooded: dict[str, int]
-    suppressed: int
-    off_diff: int
-    open_finding_threads: int
-    # Static-analysis hints on files no batch holds (lockfiles) that found no
-    # security or correctness call to carry them.
-    unbatched_hints_dropped: int = 0
-    # Findings dropped per lens because their prose was the model's note to
-    # itself about its output format (see selftalk.py).
-    self_talk: dict[str, int] = field(default_factory=dict)
-    # Lenses that answered only once reasoning was switched off — the rung below
-    # `stepped_down`, and a different claim about where the findings came from.
-    reasoning_off: list[str] = field(default_factory=list)
-    # Matched spec roots none of whose files fit the spec budget, and whether
-    # the spec lens ran at all (against the specs that did fit).
-    spec_unfit: list[str] = field(default_factory=list)
-    spec_reviewed: bool = False
-    # The reflection audit's diff had to be trimmed to fit max_input_tokens.
-    reflection_trimmed: bool = False
-
-
-def _build_notices(state: _NoticeState) -> list[str]:
-    notices: list[str] = []
-    cfg = state.cfg
-    if state.capped_files:
-        notices.append(
-            f"⚠️ Reviewed the top {cfg.max_files} of {state.total_files} changed files "
-            f"(file cap {cfg.max_files}). Raise max_files to review them all."
-        )
-    if state.oversized:
-        listed = ", ".join(code_span(path) for path in state.oversized[:10])
-        more = ", …" if len(state.oversized) > 10 else ""
-        notices.append(
-            f"📄 Skipped {len(state.oversized)} oversized file{_plural(len(state.oversized))} "
-            f"(over {cfg.max_file_diff_lines} diff lines): {listed}{more}. "
-            "Raise `max_file_diff_lines` (0 disables) to review them."
-        )
-    if state.skipped_by_triage:
-        listed = ", ".join(code_span(path) for path in state.skipped_by_triage[:10])
-        more = ", …" if len(state.skipped_by_triage) > 10 else ""
-        notices.append(
-            f"🔎 Triage skipped {len(state.skipped_by_triage)} low-risk "
-            f"file{_plural(len(state.skipped_by_triage))}: {listed}{more} "
-            "(`/review full` reviews everything)."
-        )
-    if state.spec_unfit:
-        listed = ", ".join(code_span(root) for root in state.spec_unfit)
-        count = len(state.spec_unfit)
-        budget = cfg.max_input_tokens // _SPEC_BUDGET_DIVISOR
-        outcome = (
-            "the spec lens judged the diff against the rest only"
-            if state.spec_reviewed
-            else "the spec lens was skipped, so the diff was not judged against "
-            + _plural(count, "it", "them")
-        )
-        notices.append(
-            f"📐 {listed} match{_plural(count, 'es', '')} this PR but none of "
-            f"{_plural(count, 'its', 'their')} files fit the spec budget ({budget} tokens, "
-            f"an eighth of `max_input_tokens`), so {outcome}. Raise `max_input_tokens` "
-            "or split the spec into smaller files to review against it."
-        )
-    budget_skips = state.errors.count(_BUDGET_SKIP_REASON)
-    if budget_skips:
-        notices.append(
-            f"💸 Token budget reached ({cfg.max_review_tokens} billable tokens): "
-            f"{budget_skips} of {state.total_calls} review call"
-            f"{_plural(budget_skips, ' was', 's were')} skipped, so this review is partial. "
-            "Raise `max_review_tokens`, or spend less per run (a `triage_model`, fewer "
-            "`categories`, lower `context_lines`)."
-        )
-    if state.failed_calls:
-        # The MOST COMMON error, not the last one. Three lenses returning prose
-        # and a fourth hitting a rate limit is a schema problem, but the last
-        # error names the rate limit and sends the reader to the wrong knob —
-        # and a wave that fails the same way N times is exactly the shape worth
-        # reporting. Identical to the old behaviour when there is one error.
-        detail = (
-            Counter(state.errors).most_common(1)[0][0]
-            if state.errors
-            else "timeout or unparseable output"
-        )
-        lost = ", ".join(sorted(set(state.failed_lenses)))
-        which = f"{lost}: " if lost else ""
-        notices.append(
-            f"⚠️ {state.failed_calls} of {state.total_calls} review calls failed "
-            f"({which}{detail}); results may be incomplete.\n{INCOMPLETE_MARKER}"
-        )
-    if state.repaired:
-        count = len(state.repaired)
-        listed = ", ".join(f"`{lens}`" for lens in state.repaired)
-        notices.append(
-            f"🔧 {count} lens{_plural(count, many='es')} returned output that did not "
-            f"parse and was reformatted by a second call ({listed}). Those findings are "
-            "complete, but a model that keeps doing this is not honouring the output "
-            "schema, which costs an extra call every time. Check the provider log for a "
-            "dropped `response_format`, or try a different model."
-        )
-    if state.re_asked:
-        count = len(state.re_asked)
-        listed = ", ".join(f"`{lens}`" for lens in state.re_asked)
-        notices.append(
-            f"🧷 {count} lens{_plural(count, many='es')} returned output that did not parse "
-            f"under the provider's JSON schema and answered when re-asked without the schema "
-            f"({listed}). Those findings are complete, but this model's structured-output "
-            "mode is producing replies lgtmaybe cannot read, so every affected lens costs two "
-            "wasted calls before the one that works. Set `structured_output: false` to skip "
-            "them, or use a model whose JSON mode works."
-        )
-    if state.failed_calls and state.schema_dropped:
-        notices.append(f"🧩 {_SCHEMA_DROP_NOTE}")
-    if state.split_batches:
-        plural = _plural(state.split_batches, many="es")
-        was = _plural(state.split_batches, "was", "were")
-        notices.append(
-            f"⏱️ {state.split_batches} batch{plural} {was} too big for one call "
-            "(timed out, or ran past the `max_tokens` ceiling) and "
-            f"{was} reviewed in smaller pieces instead. Consider a lower "
-            "`max_input_tokens`, a higher `max_tokens`, or a faster model."
-        )
-    if state.stepped_down:
-        count = len(state.stepped_down)
-        listed = ", ".join(f"`{lens}`" for lens in state.stepped_down)
-        notices.append(
-            f"🧠 {count} lens{_plural(count, many='es')} spent its whole `max_tokens` "
-            f"ceiling on reasoning and was re-run once at a lower `reasoning_effort` "
-            f"({listed}). Those findings come from the lower setting. Lower "
-            "`reasoning_effort` yourself, or raise `max_tokens`, to make that the "
-            "first attempt rather than the second."
-        )
-    if state.reasoning_off:
-        count = len(state.reasoning_off)
-        listed = ", ".join(f"`{lens}`" for lens in state.reasoning_off)
-        notices.append(
-            f"🧠 {count} lens{_plural(count, many='es')} spent its whole `max_tokens` "
-            f"ceiling on reasoning at a lower `reasoning_effort` too, and was re-run "
-            f"once with reasoning switched off ({listed}). Those findings come from "
-            "a run without thinking: this model treats `reasoning_effort` as a "
-            "switch, so set it to `none` yourself, or raise `max_tokens`, to make "
-            "that the first attempt rather than the third."
-        )
-    if state.escalated:
-        count = len(state.escalated)
-        listed = ", ".join(f"`{lens}`" for lens in sorted(state.escalated))
-        models = ", ".join(f"`{model}`" for model in sorted(set(state.escalated.values())))
-        notices.append(
-            f"\u2934\ufe0f {count} lens{_plural(count, many='es')} could not be answered by "
-            f"`{cfg.model}` and {_plural(count, 'was', 'were')} re-run on the fallback model "
-            f"{models} ({listed}). Those findings are complete, but the review only finished "
-            "because a second model paid for it, and a lens that keeps needing the fallback is "
-            "saying it should be the primary."
-        )
-    if state.flooded:
-        listed = ", ".join(
-            f"`{lens}` ({dropped} dropped)" for lens, dropped in sorted(state.flooded.items())
-        )
-        notices.append(
-            f"⚠️ Bounded a lens to the top {cfg.max_findings_per_lens} findings by severity: "
-            f"{listed}. A lens returning many more findings than this is usually restating "
-            f"one claim across many lines. Raise max_findings_per_lens to keep them all."
-        )
-    if state.self_talk:
-        count = sum(state.self_talk.values())
-        listed = ", ".join(f"`{lens}` ({n})" for lens, n in sorted(state.self_talk.items()))
-        notices.append(
-            f"🗑️ {count} finding{_plural(count)} {_plural(count, 'was', 'were')} dropped because "
-            f"the model's reply carried its own repair note inside {_plural(count, 'it', 'them')} "
-            '("discard the corrupted output… output valid JSON only"): '
-            f"{listed}. That is the model talking to itself, not a review, and posting it would "
-            "put an instruction in front of everyone who reads this thread; whatever genuine "
-            "finding it was wrapped around is lost with it. A model that keeps doing this is "
-            "unstable on this workload. Try a different model."
-        )
-    if state.reflection_skipped:
-        notices.append(
-            f"⚠️ {state.reflection_skipped}: the self-reflection audit was skipped, "
-            "so findings may include false positives."
-        )
-    if state.reflection_trimmed:
-        notices.append(
-            "✂️ The self-reflection audit ran on a trimmed diff: the full diff "
-            f"exceeded `max_input_tokens` ({cfg.max_input_tokens:,}), so only the "
-            "flagged files' patches that fit were kept, in diff order. Flagged "
-            "patches too large to fit were skipped. Raise `max_input_tokens` to "
-            "audit the whole diff."
-        )
-
-    count_notices: tuple[tuple[int, Callable[[int], str]], ...] = (
-        (
-            state.suppressed,
-            lambda count: (
-                f"🙈 {count} finding{_plural(count)} suppressed (ignored fingerprint, "
-                "inline `lgtmaybe: ignore`, or a 👎 from a previous run), not counted below."
-            ),
-        ),
-        (
-            state.off_diff,
-            lambda count: (
-                f"🔍 {count} scan finding{_plural(count)} skipped: on unchanged "
-                "lines outside this PR's diff. Run the tool over the repository to see them."
-            ),
-        ),
-        (
-            state.unbatched_hints_dropped,
-            lambda count: (
-                f"🧰 {count} static-analysis hint{_plural(count)} skipped: "
-                f"{_plural(count, 'it is', 'they are')} on dependency lockfiles or manifests "
-                "the diff does not show, and no security or correctness review call ran to "
-                "read them. Add `security` to `categories`, or set the tool to `finding` in "
-                "`static_analysis.tool_mode` to post them directly."
-            ),
-        ),
-        (
-            state.open_finding_threads,
-            lambda count: (
-                f"💬 {count} earlier lgtmaybe "
-                f"{_plural(count, 'conversation is', 'conversations are')} still unresolved on "
-                "this PR. This run's count covers what it reviewed now, not those."
-            ),
-        ),
-    )
-    notices.extend(render(count) for count, render in count_notices if count)
-    return notices
-
 
 def concurrency_cap(cfg: ReviewConfig) -> int:
     """How many model calls this run may have in flight: the explicit cap, else
@@ -525,424 +201,6 @@ def concurrency_cap(cfg: ReviewConfig) -> int:
 def _resolve_workers(cfg: ReviewConfig, task_count: int) -> int:
     """The fan-out pool size: the cap above, narrowed to the work there is."""
     return max(1, min(concurrency_cap(cfg), task_count))
-
-
-@dataclass(frozen=True)
-class _Lens:
-    """One review lens in the fan-out: a built-in category or a user-defined lens.
-
-    ``user_block`` is the split layout's final user message, keeping the lens
-    checklist outside the shared preamble and diff prefix.
-    ``carries_intent`` is true only for the built-in intent lens, the one call
-    that receives the stated-intent block; ``carries_spec`` likewise for the spec
-    lens and the committed-specification block.
-    """
-
-    id: str
-    user_block: str
-    carries_intent: bool = False
-    carries_spec: bool = False
-    # For a merged (fast-preset) lens: the category values the model may stamp
-    # on its findings. The engine keeps a model-supplied category in this set
-    # and falls back to the lens id otherwise; None (a focused lens) means the
-    # lens id is always stamped — the model's value is ignored, as before.
-    allowed_categories: frozenset[str] | None = None
-
-
-def _build_lenses(cfg: ReviewConfig, *, has_intent: bool, has_spec: bool = False) -> list[_Lens]:
-    """All lenses to run: built-ins (grouped per the preset), then user lenses.
-
-    The fast preset runs the ten everyday built-ins as FIVE distinct lenses —
-    security, correctness, code health, artefacts, architecture — one per
-    concern, the same set on every provider. The lens set is a property of the
-    preset, not of how many workers happen to be available: a single-worker
-    provider runs the same five calls, serially. This grouping applies only
-    when ``categories`` is the untouched default: a user who explicitly listed
-    lenses asked for exactly those, so the preset never regroups them. The full
-    preset runs every category; an explicit list runs exactly its selected
-    categories. Both skip intent when nothing states an intent, and skip spec
-    when no committed specification matches the PR.
-
-    Spec is the one built-in that does not fold into a fast-preset group. It
-    carries a large block of its own (requirements, design, task list) and under
-    ``fast`` the correctness lens already carries the stated intent; stacking
-    both on one call degrades it. So a matched spec adds a SIXTH call — paid only
-    in repositories that commit a spec the PR is delivering.
-
-    """
-    # Whether the model should still be asked for dependency-advisory claims.
-    # Config-derived on purpose: keying this on whether the binary happens to be
-    # installed would make the prompt — and the shared prefix cache — vary by
-    # machine. A configured-but-missing finding-mode tool warns instead.
-    deps = not _scanner_covers(cfg, StaticAnalysisTool.osv_scanner)
-    # Likewise for committed secrets: redaction has already rewritten every
-    # secret it matched to `[REDACTED]` before the diff leaves, so a scanner
-    # reading the unredacted text answers this far better than the lens can.
-    secrets = not _scanner_covers(cfg, StaticAnalysisTool.gitleaks)
-    fast = cfg.preset is ReviewPreset.fast and list(cfg.categories) == list(ReviewCategory)
-    if fast:
-        lenses = [
-            _Lens(
-                id=ReviewCategory.security.value,
-                user_block=build_lens_block(ReviewCategory.security, secret_scanning=secrets),
-            ),
-        ]
-        lenses.append(
-            _Lens(
-                id=ReviewCategory.correctness.value,
-                user_block=build_correctness_block(has_intent),
-                carries_intent=has_intent,
-                allowed_categories=(
-                    frozenset({ReviewCategory.correctness.value, ReviewCategory.intent.value})
-                    if has_intent
-                    else None
-                ),
-            )
-        )
-        lenses += [
-            _Lens(
-                id=group.id,
-                user_block=build_group_block(group, dependency_health=deps),
-                allowed_categories=frozenset(c.value for c in group.members),
-            )
-            for group in FAST_GROUPS
-        ]
-        # Architecture is its own call, not a code-health member: that group
-        # already carries four concerns, and design findings would be crowded
-        # out by the cheaper performance and complexity nits beside them.
-        lenses.append(
-            _Lens(
-                id=ReviewCategory.architecture.value,
-                user_block=build_lens_block(ReviewCategory.architecture),
-            )
-        )
-        if has_spec:
-            lenses.append(_spec_lens())
-    else:
-        lenses = [
-            _Lens(
-                id=category.value,
-                user_block=build_lens_block(
-                    category, dependency_health=deps, secret_scanning=secrets
-                ),
-                carries_intent=category is ReviewCategory.intent,
-                carries_spec=category is ReviewCategory.spec,
-            )
-            for category in cfg.categories
-        ]
-        if not has_intent and any(lens.carries_intent for lens in lenses):
-            lenses = [lens for lens in lenses if not lens.carries_intent]
-            _log.info("intent lens skipped — no stated intent (title/description/commits)")
-        if not has_spec and any(lens.carries_spec for lens in lenses):
-            lenses = [lens for lens in lenses if not lens.carries_spec]
-            _log.info("spec lens skipped — no committed specification matches this PR")
-    lenses += [
-        _Lens(
-            id=lens.id,
-            user_block=build_custom_lens_block(lens),
-        )
-        for lens in cfg.extra_lenses
-    ]
-    return lenses
-
-
-def _spec_lens() -> _Lens:
-    """The spec lens, built the same way in either preset."""
-    return _Lens(
-        id=ReviewCategory.spec.value,
-        user_block=build_lens_block(ReviewCategory.spec),
-        carries_spec=True,
-    )
-
-
-# One prepared _review_lens call, ready to submit to the fan-out pool.
-_LensOutcome = tuple[list[ReviewFinding], str | None]
-# Builds the (intent, hint, directory, spec) blocks for one set of file paths:
-# a batch's own set, or the subset a split piece shows.
-_BlocksFor = Callable[[set[str]], tuple[str | None, str | None, str | None, str | None]]
-_ReviewTask = partial[_LensOutcome]
-
-
-class _RetryableReason(str):
-    """A failure reason a later, identical call could still succeed at.
-
-    The provider was briefly unavailable — a capacity 429, a 5xx, a stalled
-    connection, a blown wall clock — so the same request issued once the fan-out
-    has drained is worth one more go (see :meth:`LLMReviewEngine._rescue`). That
-    is the opposite of a failure we caused: unparseable output at temperature 0
-    returns the same unparseable answer, and a ceiling the user set
-    (`max_review_seconds`, `max_review_tokens`, a termination signal) is not a
-    fault to retry past at all.
-
-    A plain ``str`` subclass, deliberately: every existing consumer — the
-    ``errors`` list, the summary's f-strings, the ``_BUDGET_SKIP_REASON``
-    comparison — keeps working byte-for-byte, and the flag rides along beside the
-    text instead of a wider outcome tuple threaded through six call sites.
-    """
-
-    __slots__ = ()
-
-
-class _PayloadReason(_RetryableReason):
-    """A provider failure that is ALSO evidence the payload was too big.
-
-    A blown wall clock or output ceiling is retryable in the sense the *adapter*
-    cares about — a genuinely later request may well succeed — but not in the
-    sense the *split* cares about. Once the pieces have been tried, re-sending
-    the original whole payload is the one thing already known not to work.
-
-    The distinction exists because :meth:`LLMReviewEngine._review_split` has to
-    tell two failures apart that both arrive as "the piece call failed":
-    ``the smaller payload also ran out of room`` (nothing left to try) and ``a
-    piece hit a capacity 429`` (the provider faltered, and the rescue wave is
-    exactly what should have it). Collapsing them excluded the second.
-    """
-
-    __slots__ = ()
-
-
-class _PiecesReason(_RetryableReason):
-    """A split whose pieces faltered on the provider: the rescue re-runs just those.
-
-    Re-running the call that split would replay the original whole batch — the
-    payload :class:`_PayloadReason` already knows cannot work, another full
-    timeout or ``max_tokens`` bill — and then every piece again, the ones that
-    answered included (observed as whole, a, b, whole, a, b). So the split hands
-    the rescue wave the only retry worth paying for: :attr:`retry`, the failed
-    pieces alone. A plain attribute, because a ``str`` subtype cannot carry a
-    non-empty ``__slots__``.
-    """
-
-    retry: Callable[[], _LensOutcome]
-
-
-def _provider_side(reason: str | None) -> bool:
-    """True when a split piece failed on the provider, not on its own size."""
-    return _rescuable(reason) and not isinstance(reason, _PayloadReason)
-
-
-class _ReasoningBoundReason(str):
-    """A truncation whose ceiling went on thought, not on the answer.
-
-    Produced only by :func:`_reasoning_exhausted_reason`, and read by
-    :meth:`LLMReviewEngine._retry_lower_effort` to tell a step-down retry that
-    cut the same way (take the off switch) from one that cut for another reason
-    (stop). NOT a :class:`_RetryableReason`: an identical request runs to the
-    identical ceiling, so the rescue wave has nothing to offer it. The same
-    plain-``str`` trick as its siblings, for the same reasons.
-    """
-
-    __slots__ = ()
-
-
-def _rescuable(reason: str | None) -> bool:
-    """True when *reason* is a provider-side failure worth one more attempt."""
-    return isinstance(reason, _RetryableReason)
-
-
-# How many rescue calls run at once. The wave exists BECAUSE the backend was
-# under pressure — a capacity limit, an overloaded endpoint — so re-bursting the
-# full fan-out width into it is the one thing most likely to reproduce the
-# failure it is trying to undo. Two is enough to keep a multi-lens rescue from
-# running strictly end-to-end.
-_RESCUE_WORKERS = 2
-
-
-@dataclass(frozen=True)
-class _PreparedCall:
-    """One lens call ready to submit, and the lens it speaks for.
-
-    The lens id travels with the task so a failure can be NAMED — a failed
-    security lens and a failed documentation lens read identically as a bare
-    count, and they are not remotely the same news.
-    """
-
-    lens_id: str
-    task: _ReviewTask
-
-
-@dataclass
-class _RunState:
-    """What one review has done so far: the facts its summary notices report,
-    and the billable tokens its model calls have spent.
-
-    Built fresh for every review and carried on its :class:`_Run`, never on the
-    engine: one engine may serve two reviews at once, and each summary must
-    describe its own run alone. Written from the fan-out's worker threads.
-
-    The sets and ``escalated`` are written directly: a set's ``add`` and a
-    dict's plain store are single operations, so they need no lock. The
-    counters (``flooded``, ``self_talk`` and the token tally) are a read, an
-    add and a store, so they change only through the methods below, which hold
-    the lock themselves; the two degradation flags go the same way. No caller
-    ever takes it by hand.
-    """
-
-    # Batches an oversized-payload failure (wall timeout or output ceiling)
-    # forced us to review in smaller pieces.
-    split_batches: set[int] = field(default_factory=set)
-    # Lenses that only answered after their reasoning effort was stepped down
-    # (see _retry_lower_effort). Keyed by lens so the notice counts lenses,
-    # not calls — the same lens stepping down in two batches is one fact
-    # about the review, not two.
-    stepped_down: set[str] = field(default_factory=set)
-    # Lenses that answered only with reasoning switched off (the rung below
-    # the step-down); kept apart because the summary makes a different claim.
-    reasoning_off: set[str] = field(default_factory=set)
-    # Lenses a SECOND model answered, keyed to the model that answered them.
-    # Two paths land here and the reader cannot tell them apart, which is the
-    # point: the engine escalating a truncation itself (see _escalate_model),
-    # and the adapter switching model on its own for any other failure. Both
-    # are read off the answering model on the result rather than recorded at
-    # the call site, so neither can be disclosed and the other not. A plain
-    # store needs no lock: two batches racing here agree on the value anyway.
-    escalated: dict[str, str] = field(default_factory=dict)
-    # Lenses whose unparseable reply was reformatted into findings by a
-    # second call (see repair.py). Keyed by lens for the same reason as
-    # `stepped_down`: one fact about the review, not one per batch.
-    repaired: set[str] = field(default_factory=set)
-    # Lenses that only parsed once the provider's JSON schema was taken off
-    # the request (see _retry_without_schema). Keyed by lens likewise.
-    re_asked: set[str] = field(default_factory=set)
-    # Findings dropped per lens by the per-lens bound (see add_flooded). Two
-    # batches' primers flooding at once would otherwise lose an update and
-    # under-report the drop in the summary notice.
-    flooded: dict[str, int] = field(default_factory=dict)
-    # Same shape: findings dropped per lens for being the model's note to
-    # itself (see add_self_talk, selftalk.py and _stamp_and_bound).
-    self_talk: dict[str, int] = field(default_factory=dict)
-    # Whether any call of this review went out without the structured-output
-    # schema it asked for, or without the configured temperature. Read off each
-    # call's result (or a failed call's exception) as it returns, never asked of
-    # the adapter afterwards: the adapter is shared, and "dropped this run" there
-    # would mean every review it has ever served. Set only through
-    # note_degradation, and only ever to True.
-    schema_dropped: bool = False
-    temperature_dropped: bool = False
-    _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
-    # Read and written only through charge() and tokens_spent().
-    _tokens: int = field(default=0, init=False)
-
-    def add_flooded(self, lens_id: str, dropped: int) -> None:
-        """Count *dropped* findings the per-lens bound cut from *lens_id*."""
-        with self._lock:
-            self.flooded[lens_id] = self.flooded.get(lens_id, 0) + dropped
-
-    def add_self_talk(self, lens_id: str, dropped: int) -> None:
-        """Count *dropped* self-talk findings removed from *lens_id*."""
-        with self._lock:
-            self.self_talk[lens_id] = self.self_talk.get(lens_id, 0) + dropped
-
-    def charge(self, tokens: int) -> None:
-        """Add one model call's billable tokens to this review's spend."""
-        with self._lock:
-            self._tokens += tokens
-
-    def note_degradation(self, *, schema_dropped: bool, temperature_dropped: bool) -> None:
-        """Record what one call lost on the way to the model."""
-        with self._lock:
-            self.schema_dropped = self.schema_dropped or schema_dropped
-            self.temperature_dropped = self.temperature_dropped or temperature_dropped
-
-    def tokens_spent(self) -> int:
-        """Billable tokens (input + output) this review's calls have spent.
-
-        The figure `max_review_tokens` is enforced against. Input + output only,
-        like :meth:`Profiler.total_tokens`, and for the same reason: it is the
-        one count every provider route agrees on.
-        """
-        with self._lock:
-            return self._tokens
-
-
-class _MeteredProvider:
-    """The review's provider, charging every call's tokens to that review.
-
-    Every model call a review makes goes through this one object: the lens
-    calls and their retries, split pieces and rescues, the repair re-ask,
-    triage and reflection. So the run's tally sees exactly the calls the
-    profiler records, without a tally parameter threaded through every module
-    that makes one. A failed call is charged what it reports spending, the way
-    the profiler's ``record_error`` charges it: a truncation reached the model
-    and is usually the costliest call of the run. What each call lost (its
-    schema, its temperature) is recorded on the same pass, from the result or
-    the failed call's exception, for the same reason. Recovery probes stay on
-    the engine's own provider; this wrapper only speaks the ``ProviderClient``
-    port.
-    """
-
-    def __init__(self, inner: ProviderClient, state: _RunState) -> None:
-        self._inner = inner
-        self._state = state
-
-    def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
-        try:
-            result = self._inner.complete(messages, model=model, **opts)
-        except Exception as exc:
-            spent = getattr(exc, "input_tokens", None) or 0
-            spent += getattr(exc, "output_tokens", None) or 0
-            self._state.charge(spent)
-            self._state.note_degradation(
-                schema_dropped=schema_dropped_on(exc),
-                temperature_dropped=temperature_dropped_on(exc),
-            )
-            raise
-        self._state.charge(result.input_tokens + result.output_tokens)
-        self._state.note_degradation(
-            schema_dropped=result.schema_dropped,
-            temperature_dropped=result.temperature_dropped,
-        )
-        return result
-
-
-@dataclass(frozen=True)
-class _Run:
-    """The settings that are fixed for a whole review, resolved once per run.
-
-    Every model call in the fan-out — the first one, an oversized batch's split
-    pieces, a deferral's re-run — reads exactly the same values, so they travel
-    as one object rather than as seven parameters re-declared at each hop.
-
-    It also carries the review's :class:`_RunState`. The reference is fixed for
-    the run like every other field; the object it points at is the run's
-    mutable record. It rides here rather than as a second parameter because
-    every hop that reads a ceiling also records an outcome, and a parallel
-    argument would be re-declared at each of them.
-    """
-
-    model: str
-    # Constrains output to the findings schema (provider-native JSON mode) on
-    # review calls only — the reflection call keeps its own format.
-    response_format: type[ReviewResult] | None
-    language: str | None
-    # The rendered project paragraph (`prompt.project_context`), "" when unset.
-    project: str
-    deadline_at: float | None
-    budget_at: int | None
-    # Mid-review retrieval budget in tokens, or None when a lens may not defer.
-    retrieval_budget: int | None
-    # How many calls this backend will serve at once (concurrency_cap). Carried
-    # for the oversized-batch split, which runs its pieces in a pool of its own
-    # and must not out-run what the fan-out itself is allowed.
-    concurrency: int
-    # The whole config, for the settings a call reads only on its failure path
-    # (the repair re-ask) — carried rather than re-threaded as parameters that
-    # every hop between review() and _complete_lens would have to re-declare.
-    cfg: ReviewConfig
-    # The provider every model call of this review goes through: the engine's
-    # own, metered into `state` (see _MeteredProvider).
-    provider: ProviderClient
-    # This review's notices and spend; see _RunState.
-    state: _RunState
-    # The PR's full changed-file list. Carried for the same reason as
-    # `concurrency`: a split piece shows FEWER files than the batch it came from,
-    # so it has to derive its own not-shown manifest rather than inherit the
-    # batch's — which would leave a piece silently unaware of its siblings' files.
-    changed_files: tuple[str, ...] = ()
-    # The PR's place in its stack (`injection.wrap_stack`), redacted, or None
-    # outside a stack. The same for every batch and lens, so it rides the shared
-    # prefix of every call, split pieces and deferral re-runs included.
-    stack_block: str | None = None
 
 
 @dataclass(frozen=True)
@@ -978,75 +236,6 @@ class _PreparedReview:
     unbatched_hints_dropped: int
     spec_unfit: list[str]
     spec_reviewed: bool
-
-
-class _OnOversized(Protocol):
-    """The split a lens call may fall back to: ``(reason, slice_hunks=...)``.
-
-    A Protocol rather than a ``Callable`` alias because the second argument is
-    keyword-only, which ``Callable[...]`` cannot express.
-    """
-
-    def __call__(self, reason: str, *, slice_hunks: bool = ...) -> _LensOutcome: ...
-
-
-def _split_batch(
-    batch: list[tuple[str, str]], *, slice_hunks: bool = False
-) -> list[list[tuple[str, str]]]:
-    """Split a timed-out batch into smaller review units.
-
-    Multi-file: halve the file list — the coarsest cut that halves the payload,
-    and the one that keeps each file's patch intact. Single file: fall back to its
-    hunks, the same unit the recursive walk uses, so an oversized lone file still
-    shrinks. Returns fewer than two pieces when there is nothing smaller to try
-    (an empty batch, or one file with a single hunk).
-
-    ``slice_hunks`` lets a lone hunk be cut *inside*, at half its own size, with
-    the same slicer the recursive walk uses. Only for a prompt the model's
-    context window refused: that failure is purely about input size, so a
-    smaller slice is guaranteed to help, where a timeout or a truncation on a
-    single hunk may be about the answer or the thinking, and slicing there is
-    the speculative recursion this split deliberately refuses.
-    """
-    if len(batch) > 1:
-        middle = len(batch) // 2
-        return [batch[:middle], batch[middle:]]
-    if not batch:
-        return []
-    path, patch = batch[0]
-    hunks = split_patch_into_hunks(patch)
-    if len(hunks) < 2:
-        if not slice_hunks or not hunks:
-            return []
-        slices = split_hunk_by_budget(hunks[0], max(1, count_tokens(hunks[0]) // 2))
-        return [[(path, piece)] for piece in slices] if len(slices) >= 2 else []
-    middle = len(hunks) // 2
-    return [
-        [(path, hunk) for hunk in hunks[:middle]],
-        [(path, hunk) for hunk in hunks[middle:]],
-    ]
-
-
-def _skip_reason(run: _Run, lens: _Lens) -> str | None:
-    """Why this model call must not be made, or None to go ahead.
-
-    Every ceiling is checked at EXECUTION time (tasks queue in the pool long
-    before a worker picks them up, and a deferral is decided later still), so the
-    figures include everything that landed in the meantime. One function, so the
-    first call and a deferral's re-run can never drift apart on when to stop.
-    The spend is this run's own tally, never the process-wide profiler, so a
-    review running beside another is charged only for its own calls.
-    """
-    if interrupt_requested():
-        _log.warning("review interrupted — skipping call", extra={"lens": lens.id})
-        return _INTERRUPT_SKIP_REASON
-    if run.deadline_at is not None and time.perf_counter() >= run.deadline_at:
-        _log.warning("review deadline reached — skipping call", extra={"lens": lens.id})
-        return "review deadline (max_review_seconds) reached: call skipped"
-    if run.budget_at is not None and run.state.tokens_spent() >= run.budget_at:
-        _log.warning("review token budget reached — skipping call", extra={"lens": lens.id})
-        return _BUDGET_SKIP_REASON
-    return None
 
 
 def _lens_messages(
@@ -1147,6 +336,15 @@ class LLMReviewEngine:
         a failure gets.
         """
         return self._provider if isinstance(self._provider, SupportsRecovery) else None
+
+    def _ladder(self) -> _Ladder:
+        """The recovery ladder for one lens call, wired back into this engine.
+
+        Built per call, like :meth:`_recovery`: the seam is this engine's own
+        ``_complete_lens`` (a re-issued call) and ``_review_lens`` (a split
+        piece), and the adapter's recovery steps as probed now.
+        """
+        return _Ladder(self._recovery(), self._complete_lens, self._review_lens)
 
     def _risk(self, ctx: PRContext, cfg: ReviewConfig) -> RiskAssessment | None:
         """The risk-of-change verdict for the summary; None when risk is off."""
@@ -1294,87 +492,16 @@ class LLMReviewEngine:
         #     `_dedupe`), and reflection is the one stage they skip; see step 8.
         all_findings = findings + prepared.scan_findings
 
-        # 6. Re-anchor: the model hand-counts line numbers from the hunk header and
-        #    routinely drifts a few lines. Snap each finding's line to the real
-        #    changed line whose content matches its verbatim `anchor`, so comments
-        #    land on the code they describe. Done before dedupe so findings the
-        #    model placed on slightly different wrong lines collapse correctly.
-        #    Scan findings snap against `scan_scope` (the diff the corpus saw)
-        #    rather than the reviewed diff: their files can have left file_patches
-        #    at triage (3c) or the file cap (3d), and dropping them as off-diff
-        #    for that would blame unchanged lines that were never the problem.
         with profiler.stage("snap"):
-            scans_at_snap = [f for f in all_findings if _is_scan_finding(f)]
-            all_findings = _snap_findings(
-                [f for f in all_findings if not _is_scan_finding(f)], reviewed_diff
-            ) + _snap_findings(scans_at_snap, prepared.scan_scope)
-            # A finding on a scan-only file (a lockfile advisory the model
-            # confirmed from an unbatched hint) has no reviewed line to sit on:
-            # the file is never in the reviewed diff. Mark it unanchored, so
-            # every gateway demotes it to the review body rather than guessing
-            # a line. Only a file a carried hint flagged is exempt from the
-            # unanchored floor in step 9: a claim about a lockfile no scanner
-            # flagged is a guess like any other unanchored finding.
-            no_line_paths = set(ctx.scan_contents) - {path for path, _ in prepared.file_patches}
-            hinted_no_line_paths = (
-                {h.path for h in prepared.unbatched} & no_line_paths
-                if prepared.carrier is not None
-                else set()
+            all_findings, hinted_no_line_paths = _snap_to_diff(
+                all_findings, ctx, prepared, reviewed_diff
             )
-            all_findings = [
-                f.model_copy(update={"anchored": False})
-                if f.path in no_line_paths and f.anchored
-                else f
-                for f in all_findings
-            ]
-
-        # 6b. Scope scan findings to the change. The tools read whole files, so
-        #     they see pre-existing code the PR never touched; an anchor that
-        #     matched no changed line means exactly that. The model is already
-        #     told "only raise these when the diff itself shows the change" —
-        #     hold the tools to the same rule, or a fixture's fake credential
-        #     posts on every PR that happens to touch the file. Dependency
-        #     findings are exempt: see _UNANCHORABLE_SCAN_CATEGORIES.
-        scoped = [f for f in all_findings if f.anchored or not _is_droppable_scan(f)]
-        off_diff = len(all_findings) - len(scoped)
-        if off_diff:
-            _log.info("scan findings outside the diff dropped", extra={"count": off_diff})
-        all_findings = scoped
-
-        # 7. Suppression: drop findings a team has marked known-fine — by
-        #    fingerprint (cfg.ignore_fingerprints) or an inline `# lgtmaybe:
-        #    ignore` pragma on/above the flagged line. Done before reflection so a
-        #    suppressed finding costs no reflection tokens and never posts.
-        #
-        #    This and the evidence gate (7b) run BEFORE the merge (7c): dedupe
-        #    keeps one finding per location, so a copy these filters would drop
-        #    could otherwise win its location and take the line's real finding
-        #    down with it.
+        all_findings, off_diff = _scope_scans(all_findings)
         with profiler.stage("suppress"):
-            unsuppressed = apply_suppressions(
-                all_findings, cfg, ctx.file_contents, ctx.feedback_downvotes
-            )
-            # Counted per location, as the merge would collapse them, so several
-            # lenses' copies of one dismissed finding read as one suppression.
-            unsuppressed_ids = {id(f) for f in unsuppressed}
-            suppressed = len(_dedupe([f for f in all_findings if id(f) not in unsuppressed_ids]))
-            all_findings = unsuppressed
+            all_findings, suppressed = _suppress(all_findings, cfg, ctx)
         if suppressed:
             _log.info("suppressed findings", extra={"count": suppressed})
-
-        # 7a. Cap the scan findings after scoping (6b) and suppression (7): the
-        #     cap bounds posted comments, so findings those stages drop must not
-        #     spend its slots — the slot a suppressed hit vacates goes to the
-        #     next on-diff hit instead. Model findings never count against it.
-        scans = [f for f in all_findings if _is_scan_finding(f)]
-        if len(scans) > MAX_SCAN_FINDINGS:
-            considered = len(scans) + off_diff  # pre-cap count, before reassignment
-            scans = sorted(scans, key=lambda f: f.severity.rank, reverse=True)[:MAX_SCAN_FINDINGS]
-            _log.info(
-                "scan findings capped after diff scoping",
-                extra={"kept": MAX_SCAN_FINDINGS, "considered": considered},
-            )
-            all_findings = [f for f in all_findings if not _is_scan_finding(f)] + scans
+        all_findings = _cap_scans(all_findings, off_diff)
 
         # 7b. Evidence gate: built-in defect findings must name a concrete way
         #     the changed code fails. Category is engine-stamped, so lowering the
@@ -1391,6 +518,52 @@ class LLMReviewEngine:
         with profiler.stage("dedupe"):
             all_findings = _dedupe(resolve_conflicts(all_findings))
 
+        # 8. Self-reflection; scan findings sit it out (see _reflect).
+        scanned = [f for f in all_findings if _is_scan_finding(f)]
+        all_findings, reflection_skipped, reflection_notices = self._reflect(
+            [f for f in all_findings if not _is_scan_finding(f)], ctx, prepared, reviewed_diff
+        )
+
+        # 8a. Arbitrate opposing advice: a lens that cuts code yields to one that
+        #     fixes the same lines. Reflection was asked to arbitrate too; this is
+        #     the deterministic referee, so it also holds under --no-reflect.
+        with profiler.stage("arbitrate"):
+            all_findings = resolve_conflicts(all_findings)
+
+        # 8b. Rejoin the deterministic findings the auditor never saw.
+        all_findings = all_findings + scanned
+
+        with profiler.stage("filter"):
+            filtered = _apply_floors(all_findings, cfg, hinted_no_line_paths)
+
+        return filtered, _summarise(
+            ctx,
+            prepared,
+            filtered,
+            errors=errors,
+            failed_lenses=failed_lenses,
+            total_calls=total_calls,
+            failed_calls=failed_calls,
+            suppressed=suppressed,
+            off_diff=off_diff,
+            reflection_skipped=reflection_skipped,
+            reflection_trimmed=bool(reflection_notices),
+            risk=risk,
+        )
+
+    def _reflect(
+        self,
+        findings: list[ReviewFinding],
+        ctx: PRContext,
+        prepared: _PreparedReview,
+        reviewed_diff: str,
+    ) -> tuple[list[ReviewFinding], str | None, list[str]]:
+        """Stage 8: the self-reflection audit of the model's findings.
+
+        Returns the surviving findings, the name of the ceiling that stopped the
+        audit (None when it ran or was off), and the audit's trim notices.
+        """
+        cfg = prepared.cfg
         # 8. Self-reflection: filter out low-confidence findings. Reflect against
         #    only the reviewed diff — redacted, and free of skipped/over-cap files.
         #    Skippable (--no-reflect) for weaker models that drop valid findings here.
@@ -1403,9 +576,7 @@ class LLMReviewEngine:
         reflection_skipped: str | None = None
         # Trim notices from the audit (diff narrowed to fit the input budget).
         reflection_notices: list[str] = []
-        scanned = [f for f in all_findings if _is_scan_finding(f)]
-        all_findings = [f for f in all_findings if not _is_scan_finding(f)]
-        if cfg.reflect and all_findings:
+        if cfg.reflect and findings:
             # Overrunning a ceiling is NOT a reason to skip the audit. The lens
             # fan-out already stops short of both ceilings (`lens_deadline_at` /
             # `lens_budget_at`) to leave the auditor room, and a review that
@@ -1422,17 +593,17 @@ class LLMReviewEngine:
                 reflection_skipped = "Review interrupted (termination signal)"
                 _log.warning(
                     "review interrupted — skipping reflection",
-                    extra={"findings": len(all_findings)},
+                    extra={"findings": len(findings)},
                 )
             else:
-                _log.info("reflecting on findings", extra={"findings": len(all_findings)})
+                _log.info("reflecting on findings", extra={"findings": len(findings)})
                 # model_copy keeps file_contents — reflection now grounds itself
                 # on the (redacted) head text of flagged files to verify
                 # whole-file claims.
                 clean_ctx = ctx.model_copy(update={"diff": reviewed_diff})
                 with profiler.stage("reflect"):
-                    all_findings = reflect_findings(
-                        all_findings,
+                    findings = reflect_findings(
+                        findings,
                         clean_ctx,
                         cfg,
                         prepared.run.provider,
@@ -1443,206 +614,37 @@ class LLMReviewEngine:
                         scan_hints=prepared.unbatched,
                         notices=reflection_notices,
                     )
-
-        # 8a. Arbitrate opposing advice: a lens that cuts code yields to one that
-        #     fixes the same lines. Reflection was asked to arbitrate too; this is
-        #     the deterministic referee, so it also holds under --no-reflect.
-        with profiler.stage("arbitrate"):
-            all_findings = resolve_conflicts(all_findings)
-
-        # 8b. Rejoin the deterministic findings the auditor never saw.
-        all_findings = all_findings + scanned
-
-        # 9. Filter: drop findings below the severity floor, and apply the
-        #    stricter unanchored floor — a finding the engine could not anchor is a
-        #    low-confidence guess, so surface it only when it's high/critical.
-        with profiler.stage("filter"):
-            filtered = [
-                f
-                for f in all_findings
-                if _passes_severity_floor(f, cfg, no_line_paths=hinted_no_line_paths)
-            ]
-
-            # 9b. Declarative post-processing (finding_rules, default none): the
-            #     team's drop / severity-remap rules, applied last so they see
-            #     exactly what would otherwise post. Imported lazily — rules.py
-            #     imports this module's glob matcher, so a top import would cycle.
-            if cfg.finding_rules:
-                from .rules import apply_finding_rules
-
-                filtered = apply_finding_rules(filtered, cfg)
-
-        state = prepared.run.state
-        summary_line = _summary_line(
-            len(filtered),
-            cfg,
-            risk,
-            temperature_dropped=state.temperature_dropped,
-            stack=ctx.stack,
-        )
-        profiler.record_returned_findings(len(filtered))
-
-        notices = _build_notices(
-            _NoticeState(
-                cfg=cfg,
-                capped_files=prepared.capped_files,
-                total_files=prepared.total_files,
-                oversized=prepared.oversized,
-                skipped_by_triage=prepared.skipped_by_triage,
-                errors=errors,
-                total_calls=total_calls,
-                failed_calls=failed_calls,
-                failed_lenses=failed_lenses,
-                split_batches=len(state.split_batches),
-                stepped_down=sorted(state.stepped_down),
-                reasoning_off=sorted(state.reasoning_off),
-                escalated=dict(state.escalated),
-                repaired=sorted(state.repaired),
-                flooded=dict(state.flooded),
-                re_asked=sorted(state.re_asked),
-                schema_dropped=state.schema_dropped,
-                reflection_skipped=reflection_skipped,
-                suppressed=suppressed,
-                off_diff=off_diff,
-                open_finding_threads=ctx.open_finding_threads,
-                unbatched_hints_dropped=prepared.unbatched_hints_dropped,
-                self_talk=dict(state.self_talk),
-                spec_unfit=prepared.spec_unfit,
-                spec_reviewed=prepared.spec_reviewed,
-                reflection_trimmed=bool(reflection_notices),
-            )
-        )
-        # Which lenses completed, on every summary shape — hidden, so it costs
-        # the rendered body nothing and a terminal never prints it.
-        lenses_marker = _lenses_marker(prepared.lenses, failed_lenses)
-        # The risk marker rides just above it, so the lenses marker still closes
-        # every summary. No verdict (off, or unavailable) means no marker at all.
-        if risk is not None and (marker := risk_marker(risk)):
-            lenses_marker = f"{marker}\n{lenses_marker}"
-        if notices:
-            return filtered, "\n\n".join([*notices, summary_line]) + f"\n{lenses_marker}"
-        # A genuinely clean review (nothing flagged, every call succeeded) gets an
-        # explicit thumbs-up rather than a bare "0 findings".
-        if not filtered:
-            return filtered, f"👍 LGTM!\n\n{summary_line}\n{lenses_marker}"
-        return filtered, f"{summary_line}\n{lenses_marker}"
+        return findings, reflection_skipped, reflection_notices
 
     def _prepare_review(self, ctx: PRContext, cfg: ReviewConfig) -> _PreparedReview:
         """Stages 1 to 4 of the pipeline: redact, filter, scan, batch, arm the calls.
 
         Everything up to (but not including) the fan-out: the run-scoped
         ceilings and per-review state, the lens set, and one prepared call per
-        (batch, lens) in ``per_batch``. Raises :class:`ReviewIncompleteError`
-        when there is code to review but no lens could run over it.
+        (batch, lens) in ``per_batch``. Each stage is a function in
+        ``stages.py``; this method only runs them in order and threads their
+        results along. Raises :class:`ReviewIncompleteError` when there is
+        code to review but no lens could run over it.
         """
-        # Soft whole-review deadline: model calls reaching execution after this
-        # instant are skipped (in-flight ones finish), so a pathological run
-        # degrades to partial-with-a-notice instead of grinding on. Measured
-        # from here so every stage — not just the model calls — counts.
-        deadline_at = (
-            time.perf_counter() + cfg.max_review_seconds if cfg.max_review_seconds else None
-        )
-        # Soft whole-review token ceiling, the spend-shaped twin of the deadline
-        # above. Counted on this run's own tally, from zero: every model call
-        # this review makes goes through `provider`, which charges it to
-        # `state`, so neither an earlier review in this process nor one running
-        # beside it on the same engine is charged against this budget.
-        budget_at = cfg.max_review_tokens or None
+        # First, so the deadline counts every stage, not just the model calls.
+        lens_deadline_at, lens_budget_at = lens_ceilings(cfg)
         # This review's own record of what happened (notices, spend), built
         # here and carried on the run, never on `self`: one engine may serve
         # two reviews at once.
         state = _RunState()
         provider = _MeteredProvider(self._provider, state)
 
-        # Lens calls stop EARLY, leaving the tail of each ceiling for the
-        # auditor. Reflection prunes a bad review, so if the lens fan-out spends
-        # the budget down to zero the audit is skipped exactly when it is most
-        # needed: measured, a runaway lens call consumed the whole deadline and
-        # 325 unaudited findings posted, 323 of them false positives on a diff
-        # with nothing wrong in it. A tenth of the budget covers one audit call
-        # and is a small amount to forgo when nothing overruns. The cap bounds
-        # the reserve on a long ceiling, and reserving a proportion rather than a
-        # fixed number of seconds means a deliberately small ceiling does not
-        # hand most of its budget to the auditor.
-        lens_deadline_at = (
-            deadline_at - min(cfg.max_review_seconds * _REFLECT_RESERVE, _MAX_REFLECT_RESERVE_S)
-            if deadline_at is not None
-            else None
-        )
-        lens_budget_at = (
-            budget_at - int(cfg.max_review_tokens * _REFLECT_RESERVE)
-            if budget_at is not None
-            else None
-        )
-
-        # 1. Redact secrets from the diff before it leaves this process.
-        with profiler.stage("redact"):
-            clean_diff = redact(ctx.diff)
-
-            # 1b. Stated intent (PR title/description/commit names) for the intent
-            #     lens: redacted like the diff, and only ever sent on the intent
-            #     call. No stated intent → skip that lens rather than burn a model
-            #     call judging the diff against nothing.
-            #
-            #     Only REDACTED here; the wrapping happens per batch, because the
-            #     block also has to name the files that batch cannot see.
-            intent_text = _intent_text(ctx)
-            clean_intent = redact(intent_text) if intent_text else None
-
-        # 1c. The committed specification this PR is delivering, when the repo
-        #     drives its work from one. Detection is a filesystem probe and
-        #     selection is deterministic, so a repo with no spec — or one whose
-        #     specs have nothing to do with this PR — costs a handful of stats
-        #     and skips the lens entirely. Wrapped per batch like the intent,
-        #     and for the same reason: the hidden-file list is batch-specific.
-        with profiler.stage("spec_context"):
-            spec_context = _resolve_spec(cfg, ctx, self._workspace_root)
-            clean_spec = spec_context.text
-        # Mid-review retrieval budget, or None when a lens may not defer at all:
-        # the feature is off, or nothing injected a read-only reader to fetch
-        # with. One scalar rather than a config-plus-fetcher pair threaded down
-        # the call chain — it answers both "may this lens defer?" and "with how
-        # many tokens?". A quarter of the input budget, the same slice
-        # reflection's deferral takes.
-        retrieval_budget = (
-            max(0, cfg.max_input_tokens // 4)
-            if cfg.mid_review_retrieval and self._fetch_file is not None
-            else None
-        )
+        clean_diff, clean_intent = redact_inputs(ctx)
+        spec = spec_context(cfg, ctx, self._workspace_root)
+        clean_spec = spec.text
         lenses = _build_lenses(
             cfg,
             has_intent=clean_intent is not None,
             has_spec=clean_spec is not None,
         )
 
-        # 2. Split into per-file patches and drop generated/binary/vendored noise,
-        #    then apply the user's path filters (include_paths allowlist, then
-        #    exclude_paths denylist).
-        with profiler.stage("split"):
-            file_patches = split_by_file(clean_diff, ctx.changed_files)
-            file_patches = [
-                (path, patch)
-                for path, patch in file_patches
-                if is_reviewable(path)
-                and passes_path_filters(path, include=cfg.include_paths, exclude=cfg.exclude_paths)
-            ]
-
-            # 2b. Per-file size cap: a patch longer than max_file_diff_lines is a
-            #     data blob or a generated file the name-based filter could not
-            #     recognise. Drop it here — before batching, so the recursive walk
-            #     never decomposes it into hundreds of per-hunk calls — and record
-            #     the names, because a silent drop reads as "everything was
-            #     covered". Like a lockfile skip, it never counts against max_files.
-            oversized: list[str] = []
-            kept: list[tuple[str, str]] = []
-            for path, patch in file_patches:
-                if passes_size_cap(patch, cfg.max_file_diff_lines):
-                    kept.append((path, patch))
-                else:
-                    oversized.append(path)
-            file_patches = kept
-
-            total_files = len(file_patches)
+        file_patches, oversized = filter_files(clean_diff, ctx, cfg)
+        total_files = len(file_patches)
 
         # 2c. Fail loud when there is code to review but no lens to review it:
         #     every configured lens was skipped (intent with nothing stated, spec
@@ -1657,103 +659,14 @@ class LLMReviewEngine:
                 "`categories`, or remove the override to run the default set."
             )
 
-        # 3b. Static-analysis grounding (default off): deterministic tool
-        #     findings over the reviewed files' head texts, fed to each batch's
-        #     lens calls as untrusted hints to confirm or discard. Guarded here
-        #     so a disabled config never touches the runner (no temp dir, no
-        #     subprocess) — behaviour is byte-identical to before the feature.
-        sa_hints: list[ToolFinding] = []
-        sa_all: list[ToolFinding] = []
-        scan_findings: list[ReviewFinding] = []
-        # The diff exactly as the scan corpus saw it: triage (3c) and the file
-        # cap (3d) narrow file_patches after this, and a scan finding must snap
-        # against what was actually scanned, not the narrower reviewed diff.
-        scan_scope = ""
-        if cfg.static_analysis.enabled and (ctx.file_contents or ctx.scan_contents):
-            with profiler.stage("static_analysis"):
-                reviewed_paths = {path for path, _ in file_patches}
-                # Reviewed file texts, plus the scan-only dependency manifests.
-                # `scan_contents` is NOT filtered by reviewed_paths: a lockfile is
-                # never reviewable, so it would never survive that filter — which
-                # is the whole reason it travels in its own channel.
-                corpus = {p: t for p, t in ctx.file_contents.items() if p in reviewed_paths}
-                corpus |= ctx.scan_contents
-                sa_all = run_static_analysis(corpus, cfg)
-                # Split by mode in one stable pass: run_static_analysis returns
-                # findings in `sa.tools` order on purpose, and the hint block is
-                # part of the cacheable prompt prefix — reordering it run to run
-                # would bust the shared-prefix cache for nothing.
-                sa_hints, direct = partition_by_mode(sa_all, cfg)
-                scan_findings = tool_review_findings(direct, corpus)
-                scan_scope = "\n".join(patch for _, patch in file_patches)
-
-        # 3c. Two-stage triage (default off): a cheap triage_model skips
-        #     plainly-non-substantive files and ranks the rest by risk, so the
-        #     strong model reviews only what deserves it. A deterministic
-        #     security floor (security paths/tokens, static-analysis hits,
-        #     large hunks) always escalates past triage, and any triage
-        #     failure reviews everything. Every static-analysis finding feeds
-        #     the floor, hint-mode or finding-mode: a direct-post hit must stop
-        #     triage skipping its file, or the diff scoping drops the hit.
-        skipped_by_triage: list[str] = []
-        if cfg.triage_model and file_patches:
-            with profiler.stage("triage"):
-                file_patches, skipped_by_triage = triage_files(file_patches, sa_all, cfg, provider)
-
-        # 3d. File cap: after triage so it drops the lowest-risk survivors,
-        # rather than whichever paths happened to appear last in the diff.
-        capped_files = len(file_patches) > cfg.max_files
-        if capped_files:
-            file_patches = file_patches[: cfg.max_files]
-
-        # 4. Pad each hunk with surrounding lines so the model sees the function
-        #    and definitions around a change. The amount is budget-scaled and
-        #    capped by cfg.context_lines; the pad is asymmetric — the code
-        #    before a change explains it better than the code after, so the
-        #    trailing side gets a quarter of the leading budget. Content is the
-        #    head file text the gateway fetched (redacted), and is for
-        #    understanding only — inline-comment positions are always built
-        #    from the real diff.
-        with profiler.stage("expand"):
-            used_tokens = sum(count_tokens(patch) for _, patch in file_patches)
-            remaining = max(0, cfg.max_input_tokens - used_tokens)
-            ctx_lines = min(cfg.context_lines, context_lines_for_budget(remaining))
-            if ctx_lines > 0 and ctx.file_contents:
-                after = trailing_context_lines(ctx_lines)
-                # Enclosing function/class boundaries (ast-grep; [] on any
-                # failure) so the leading pad reaches the signature. Each file
-                # costs its own temp dir + subprocess, and function_context is
-                # on by default — run serially a max-sized PR pays ~max_files
-                # spawn/teardown cycles before batching even starts. They are
-                # independent, so they overlap, like static analysis's tools.
-                boundaries = _definition_spans_by_path(ctx.file_contents, file_patches, cfg)
-                file_patches = [
-                    (
-                        path,
-                        expand_hunks(
-                            patch,
-                            redact(ctx.file_contents.get(path, "")),
-                            ctx_lines,
-                            after=after,
-                            boundaries=boundaries.get(path),
-                        ),
-                    )
-                    for path, patch in file_patches
-                ]
-
-        with profiler.stage("batch"):
-            batches = batch_files(
-                file_patches, max_tokens=_batch_budget(lenses, cfg), recursive=cfg.recursive
-            )
-
-        # 4b. Directory-scoped context files, read ONCE for the whole review from
-        #     the checked-out workspace (trusted base content — never the PR
-        #     head, which is why no gateway fetcher is involved). Which of them
-        #     a given batch actually sees is decided per batch below.
-        with profiler.stage("directory_context"):
-            dir_contents = (
-                load_context_files(cfg, self._workspace_root) if cfg.directory_rules else {}
-            )
+        scan = scan_files(file_patches, ctx, cfg)
+        file_patches, skipped_by_triage = triage_patches(
+            file_patches, scan.tool_findings, cfg, provider
+        )
+        file_patches, capped_files = cap_files(file_patches, cfg)
+        file_patches = expand_context(file_patches, ctx, cfg)
+        batches = batch_patches(file_patches, lenses, cfg)
+        dir_contents = directory_context(cfg, self._workspace_root)
 
         # Announce the queued work before any model call returns, so a long run
         # on a slow provider shows up immediately in the Action log instead of
@@ -1767,72 +680,57 @@ class LLMReviewEngine:
             },
         )
 
-        # Everything a model call needs that does not vary across the run, in one
-        # object: resolved here, then carried unchanged through the fan-out, the
-        # oversized-batch split, and a deferral's re-run.
-        run = _Run(
-            model=cfg.model,
-            # Constrain output to the findings schema (provider-native JSON mode) per
-            # review call — NOT globally, so the reflection call keeps its own format.
-            response_format=ReviewResult if cfg.structured_output else None,
-            language=cfg.language,
-            project=project_context(cfg.project),
-            deadline_at=lens_deadline_at,
-            budget_at=lens_budget_at,
-            retrieval_budget=retrieval_budget,
-            concurrency=concurrency_cap(cfg),
-            cfg=cfg,
-            provider=provider,
-            state=state,
-            changed_files=tuple(ctx.changed_files),
-            stack_block=wrap_stack(_redacted_stack(ctx.stack)),
+        run = _new_run(
+            cfg,
+            ctx,
+            provider,
+            state,
+            (lens_deadline_at, lens_budget_at),
+            can_fetch=self._fetch_file is not None,
         )
         workers = _resolve_workers(cfg, len(batches) * len(lenses))
-        # Hints on scan-only files (dependency lockfiles and manifests the review
-        # never reads line by line) have no batch to join, so the per-batch
-        # filter below would lose them. They ride ONE lens call instead: the
-        # first batch's security lens (correctness when the run has no security
-        # lens), on that lens's own uncached block, so the shared prefix every
-        # sibling lens reads from cache stays byte-identical.
-        batched_paths = {path for batch in batches for path, _ in batch}
-        unbatched = [
-            h for h in sa_hints if h.path in ctx.scan_contents and h.path not in batched_paths
-        ]
-        carrier = _unbatched_hint_carrier(lenses) if unbatched and batches else None
-        unbatched_dropped = len(unbatched) if carrier is None else 0
-        if unbatched_dropped:
-            _log.info(
-                "unbatched static-analysis hints had no lens to carry them",
-                extra={"count": unbatched_dropped},
-            )
-        carrier_lens = (
-            replace(
-                carrier,
-                user_block=f"{_unbatched_hint_block(unbatched)}\n\n{carrier.user_block}",
-            )
-            if carrier is not None
-            else None
+        unbatched = carry_unbatched_hints(scan.hints, ctx.scan_contents, batches, lenses)
+        blocks_for = blocks_builder(ctx, cfg, scan.hints, clean_intent, clean_spec, dir_contents)
+        per_batch = self._arm_calls(
+            run, batches, lenses, workers, blocks_for, unbatched, ctx.changed_files
         )
+
+        return _PreparedReview(
+            cfg=cfg,
+            run=run,
+            lenses=lenses,
+            per_batch=per_batch,
+            workers=workers,
+            file_patches=file_patches,
+            scan_findings=scan.findings,
+            scan_scope=scan.scope,
+            unbatched=unbatched.hints,
+            carrier=unbatched.carrier,
+            oversized=oversized,
+            skipped_by_triage=skipped_by_triage,
+            total_files=total_files,
+            capped_files=capped_files,
+            unbatched_hints_dropped=unbatched.dropped,
+            spec_unfit=list(spec.unfit),
+            spec_reviewed=clean_spec is not None,
+        )
+
+    def _arm_calls(
+        self,
+        run: _Run,
+        batches: list[list[tuple[str, str]]],
+        lenses: list[_Lens],
+        workers: int,
+        blocks_for: _BlocksFor,
+        unbatched: UnbatchedHints,
+        changed_files: Sequence[str],
+    ) -> list[tuple[bool, list[_PreparedCall]]]:
+        """One prepared call per (batch, lens), and whether each batch warms the cache.
+
+        The first batch's carrier lens is swapped for the copy that carries the
+        unbatched hints (see :func:`stages.carry_unbatched_hints`).
+        """
         per_batch: list[tuple[bool, list[_PreparedCall]]] = []
-
-        # Blocks for any SUBSET of a batch's files. A split piece shows a
-        # subset, so the batch's own intent, spec, hint and directory blocks
-        # are wrong for it twice over: their not-visible lists omit the
-        # sibling-piece files, and their hints and rules cover files the piece
-        # cannot see. One builder serves the batch and each piece, so the two
-        # can never drift.
-        def blocks_for(paths: set[str]) -> tuple[str | None, str | None, str | None, str | None]:
-            not_visible = files_not_visible(ctx.changed_files, paths)
-            hints = [h for h in sa_hints if h.path in paths]
-            return (
-                wrap_intent(clean_intent, not_visible) if clean_intent is not None else None,
-                wrap_hints(redact(format_hints(hints))) if hints else None,
-                build_directory_block(rules_for(paths, cfg), dir_contents)
-                if cfg.directory_rules
-                else None,
-                wrap_spec(clean_spec, not_visible) if clean_spec is not None else None,
-            )
-
         for batch_num, batch in enumerate(batches, start=1):
             batch_diff = "\n".join(patch for _, patch in batch)
             wrapped = wrap_diff(batch_diff)
@@ -1840,7 +738,7 @@ class LLMReviewEngine:
             # messages can quote hostile file content — same posture as the
             # diff) and wrapped as their own neutralised untrusted block.
             batch_paths = {path for path, _ in batch}
-            not_visible = files_not_visible(ctx.changed_files, batch_paths)
+            not_visible = files_not_visible(changed_files, batch_paths)
             intent_block, hint_block, dir_block, spec_block = blocks_for(batch_paths)
             # What this call was NOT shown, for EVERY lens — not just the two that
             # judge a whole-PR promise. Absence stated as fact beats absence
@@ -1858,6 +756,7 @@ class LLMReviewEngine:
             # small diff keeps full concurrency, and on a fan-out wide enough
             # for there to be a wave at all.
             warm = workers > 1 and len(lenses) > 1 and count_tokens(wrapped) >= _WARMUP_MIN_TOKENS
+            carrier_lens = unbatched.carrier_lens
             batch_calls = [
                 _PreparedCall(
                     lens_id=lens.id,
@@ -1870,7 +769,7 @@ class LLMReviewEngine:
                         dir_block,
                         batch_num,
                         carrier_lens
-                        if carrier_lens is not None and batch_num == 1 and lens is carrier
+                        if carrier_lens is not None and batch_num == 1 and lens is unbatched.carrier
                         else lens,
                         batch,
                         spec_block=spec_block,
@@ -1881,26 +780,7 @@ class LLMReviewEngine:
                 for lens in lenses
             ]
             per_batch.append((warm, batch_calls))
-
-        return _PreparedReview(
-            cfg=cfg,
-            run=run,
-            lenses=lenses,
-            per_batch=per_batch,
-            workers=workers,
-            file_patches=file_patches,
-            scan_findings=scan_findings,
-            scan_scope=scan_scope,
-            unbatched=unbatched,
-            carrier=carrier,
-            oversized=oversized,
-            skipped_by_triage=skipped_by_triage,
-            total_files=total_files,
-            capped_files=capped_files,
-            unbatched_hints_dropped=unbatched_dropped,
-            spec_unfit=list(spec_context.unfit),
-            spec_reviewed=clean_spec is not None,
-        )
+        return per_batch
 
     def _fan_out(
         self,
@@ -1920,7 +800,7 @@ class LLMReviewEngine:
         freely — batch 2's primer runs while batch 1's followers are in
         flight, so warming never re-serialises the whole review.
 
-        Whatever failed transiently then gets one more go; see :meth:`_rescue`.
+        Whatever failed transiently then gets one more go; see :func:`recovery._rescue`.
         """
         results: dict[int, _LensOutcome] = {}
         with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -1952,64 +832,7 @@ class LLMReviewEngine:
                         # strand its batch): release the deferred lens calls.
                         for call_index, call in deferred.pop(batch_index, []):
                             pending[pool.submit(call.task)] = call_index
-        return self._rescue(calls, [results[i] for i in sorted(results)])
-
-    def _rescue(
-        self, calls: list[_PreparedCall], outcomes: list[_LensOutcome]
-    ) -> list[_LensOutcome]:
-        """Re-run the calls that failed on the provider, once, and merge them in.
-
-        One flaky call used to void the whole round: three consecutive reviews
-        each reported "1 of 4 review calls failed" while the other three lenses
-        succeeded, and a run fifteen minutes later found what the partial rounds
-        had missed. The lenses that answered are not the problem — the one that
-        did not is, and the cheapest honest fix is to ask it again.
-
-        Bounded on every axis that matters:
-
-        - **Only provider-side failures** (:class:`_RetryableReason`). Unparseable
-          output re-runs to the same unparseable answer at temperature 0, and a
-          ceiling the user set is not a fault to retry past.
-        - **One wave.** The rescue's own outcome is never rescued again, because
-          this runs once — a lens that is genuinely down costs exactly one extra
-          call and then reports itself, rather than grinding.
-        - **Every ceiling still applies.** Each rescue re-enters ``_review_lens``,
-          which re-checks ``_skip_reason`` first, so `max_review_seconds`, the
-          token budget and a termination signal all still stop it dead.
-        - **A pool of its own, entered only after the fan-out's has closed.** Never
-          submitted from inside a fan-out worker: a worker that submits to its own
-          pool and blocks on the result deadlocks the moment the pool saturates
-          (the same trap ``_review_split`` avoids by construction). And narrow —
-          see :data:`_RESCUE_WORKERS`.
-
-        Findings from both attempts are kept and left to the pipeline's ``_dedupe``
-        to collapse, exactly as a deferral's re-run is: a wall timeout can salvage
-        real findings before it fails, and binning them because the second attempt
-        also produced some would lose work the provider already billed for.
-        """
-        retrying = [i for i, (_, error) in enumerate(outcomes) if _rescuable(error)]
-        if not retrying:
-            return outcomes
-        _log.warning(
-            "re-running review calls that failed on the provider",
-            extra={"calls": len(retrying), "lenses": [calls[i].lens_id for i in retrying]},
-        )
-        merged = list(outcomes)
-
-        def rerun(index: int) -> _LensOutcome:
-            # A split's failed pieces, never the oversized whole — see _PiecesReason.
-            error = outcomes[index][1]
-            return error.retry() if isinstance(error, _PiecesReason) else calls[index].task()
-
-        width = min(len(retrying), _RESCUE_WORKERS)
-        with ThreadPoolExecutor(max_workers=width, thread_name_prefix="lgtmaybe-rescue") as pool:
-            # map() yields in submission order, so the merge stays deterministic
-            # however the calls interleave.
-            rescued = list(pool.map(rerun, retrying))
-        for index, (findings, error) in zip(retrying, rescued, strict=True):
-            first_findings, _ = merged[index]
-            merged[index] = (first_findings + findings, error)
-        return merged
+        return _rescue(calls, [results[i] for i in sorted(results)])
 
     def _review_lens(
         self,
@@ -2036,7 +859,7 @@ class LLMReviewEngine:
         ``batch`` is the file patches ``wrapped`` was built from. Supplying it opts
         this call into the one retry an oversized payload can actually benefit
         from: the payload is split and the pieces reviewed (see
-        :meth:`_review_split`). None means "already a piece" — no further
+        ``_Ladder._review_split``). None means "already a piece" — no further
         splitting. ``blocks_for`` rebuilds the per-batch blocks for each piece's
         own file set; None means there is nothing smaller to rebuild for.
 
@@ -2058,7 +881,7 @@ class LLMReviewEngine:
             None
             if batch is None
             else partial(
-                self._review_split,
+                self._ladder()._review_split,
                 run=run,
                 batch=batch,
                 intent_block=intent_block,
@@ -2191,621 +1014,6 @@ class LLMReviewEngine:
         )
         return findings + retry, error
 
-    def _remedy_oversized(
-        self,
-        completed: list[ReviewFinding],
-        reason: str,
-        exhausted: str | None,
-        *,
-        messages: list[Message],
-        response_format: type[ReviewResult] | None,
-        batch_num: int,
-        lens: _Lens,
-        run: _Run,
-        on_oversized: _OnOversized | None,
-        effort: dict[str, Any] | None,
-        escalate_to: str | None,
-        slice_hunks: bool = False,
-    ) -> _LensOutcome:
-        """Work the truncation ladder for one cut-off lens call.
-
-        The whole remedy in one place, because a cut-off generation reaches the
-        engine by two different routes and which one fires is an accident of what
-        the provider reports, not a fact about the failure:
-
-        - the adapter sees it, when the route says ``length`` or the response
-          spends a ceiling we configured, and raises ``ProviderTruncated``;
-        - the PARSER sees it, when the route says nothing useful — litellm
-          rewrites an unrecognised finish reason to ``stop``, and a model can stop
-          mid-object well short of the cap — and only the unterminated JSON gives
-          it away.
-
-        The second route used to end here with a reason saying no split was
-        attempted, so an identical failure cost the whole lens on one model and
-        merely a slower review on another. Measured on a gateway model at 43.2%
-        completeness over 100k-token inputs: what the declared ceiling bought was
-        recovery, not accuracy.
-
-        *completed* is the salvage, already stamped. *exhausted* is the
-        reasoning-bound diagnosis (see :func:`_reasoning_exhausted_reason`) or
-        None, decided by the caller because only it holds the right denominator.
-
-        The rungs, in order, and never more than one of the first two:
-        shrink the payload (:meth:`_review_split`) when the answer outgrew the
-        ceiling, step the thinking down (:meth:`_retry_lower_effort`) when the
-        reasoning did, and only then change the model
-        (:meth:`_escalate_model`) — which says nothing about the failure, so it
-        goes last and is spent by the whole batch rather than by each piece.
-        """
-        if exhausted is not None:
-            # The ceiling went on thinking, not on findings: shrinking the
-            # payload cannot shrink that, so the split is skipped and the
-            # reason names the lever that does move it. Checked before the
-            # "already a piece" case below so a piece reports it too — it is
-            # the better diagnosis wherever the truncation happens.
-            _log.warning(
-                "truncation was reasoning-bound — not splitting",
-                extra={"lens": lens.id, "batch": batch_num},
-            )
-            if effort is not None or escalate_to is not None:
-                # Either this IS the step-down retry and it went the same
-                # way — one attempt, not a cascade: the lower level did
-                # not fit either, and grinding down the ladder spends the
-                # whole review proving it — or this is the escalation,
-                # which is the last rung and takes no remedy of its own.
-                # Stepping THAT down would re-run the primary at an effort
-                # the primary has already failed at. The caller that
-                # offered the step-down decides what follows it.
-                return completed, exhausted
-            retried, retry_reason = self._retry_lower_effort(
-                messages, response_format, batch_num, lens, exhausted, run
-            )
-            if retry_reason is None or on_oversized is None:
-                # Answered, or this is a piece/retry — see _escalate_model
-                # for why only the whole batch may buy a fallback call.
-                return completed + retried, retry_reason
-            escalated, escalate_reason = self._escalate_model(
-                messages, response_format, batch_num, lens, retry_reason, run
-            )
-            return completed + retried + escalated, escalate_reason
-        if on_oversized is None:
-            # Already a piece: nothing smaller to try. Report the reason
-            # rather than recurse — an unbounded cascade would spend the
-            # whole review on a model that cannot answer at any size.
-            return completed, reason
-        findings, split_reason = on_oversized(reason, slice_hunks=slice_hunks)
-        if split_reason is None:
-            return completed + findings, None
-        if isinstance(split_reason, _PiecesReason):
-            # The split worked — the payload shrank and a piece answered — so the
-            # remaining failure is a transient provider blip on one piece, and the
-            # reason already carries that piece's retry. Escalating here re-sends
-            # the request the split just recovered from and replaces the piece
-            # reason with the fallback's own failure, so the rescue wave would
-            # replay the oversized whole batch the split exists to avoid.
-            return completed + findings, split_reason
-        # The pieces did not cover the batch either, so the payload was
-        # never the whole story. Last rung: the same request, a different
-        # model. Any findings the pieces did manage ride along, and the
-        # overlap with the escalation's collapses in `_dedupe`.
-        escalated, escalate_reason = self._escalate_model(
-            messages, response_format, batch_num, lens, split_reason, run
-        )
-        return completed + findings + escalated, escalate_reason
-
-    def _review_split(
-        self,
-        reason: str,
-        *,
-        run: _Run,
-        batch: list[tuple[str, str]],
-        intent_block: str | None,
-        hint_block: str | None,
-        dir_block: str | None,
-        batch_num: int,
-        lens: _Lens,
-        spec_block: str | None = None,
-        hidden_block: str | None = None,
-        blocks_for: _BlocksFor | None = None,
-        slice_hunks: bool = False,
-    ) -> _LensOutcome:
-        """Re-review an oversized batch as smaller pieces, one call each.
-
-        The only retry a payload-sized failure can benefit from — whether the call
-        ran out of *time* (a wall timeout) or ran out of *room to answer* (the
-        model's output ceiling). Repeating the same request is pointless — same
-        payload, same model, same budget, same ceiling — but the payload is the one
-        thing we can change, and a smaller one both fits the budgets better and gets
-        fresh ones. Failing the lens outright instead would discard the whole
-        batch's review over a size problem, which is what a real run did: three of
-        four lenses produced nothing because each had more to say than one response
-        could hold.
-
-        Bounded on purpose: exactly ONE level (the pieces are reviewed with
-        ``batch=None``, so a piece that fails the same way again just fails), and
-        the pieces are re-wrapped from the same redacted patches, so nothing
-        unredacted or unwrapped reaches the model. Returns the original *reason*
-        unchanged when the batch cannot be split — a single-hunk file has no
-        smaller unit to fall back to.
-
-        The pieces run concurrently (see below) and each still goes through
-        ``_review_lens``, so each re-checks the whole-review deadline and token
-        budget at execution: a split that begins past a ceiling costs nothing,
-        and running the pieces together only shortens the overshoot a split in
-        flight can add — it was already bounded at one call's latency.
-
-        Not attempted at all when the truncation was reasoning-bound; see
-        :func:`_reasoning_exhausted_reason`, which decides that before we get here.
-        """
-        pieces = _split_batch(batch, slice_hunks=slice_hunks)
-        if len(pieces) < 2:
-            # Nothing smaller to try, so nothing has retried this call at all —
-            # the reason travels on unchanged, retryable flag and all, and a
-            # transient stall still gets its one go from the rescue wave.
-            return [], reason
-        _log.warning(
-            "review call was too big for one response — retrying on smaller pieces",
-            extra={"lens": lens.id, "batch": batch_num, "pieces": len(pieces)},
-        )
-
-        def review_piece(piece: list[tuple[str, str]]) -> _LensOutcome:
-            # Recomputed, never inherited: this piece carries a subset of the
-            # batch's files, so the batch's manifest would omit exactly the
-            # sibling-piece files this call is now missing — and so would its
-            # intent, spec, hint and directory blocks, which additionally
-            # carry hints and rules for files the piece cannot see.
-            piece_paths = {path for path, _ in piece}
-            piece_hidden = wrap_not_shown(files_not_visible(run.changed_files, piece_paths))
-            piece_intent, piece_hint, piece_dir, piece_spec = (
-                blocks_for(piece_paths)
-                if blocks_for is not None
-                else (intent_block, hint_block, dir_block, spec_block)
-            )
-            return self._review_lens(
-                run,
-                wrap_diff("\n".join(patch for _, patch in piece)),
-                piece_intent,
-                piece_hint,
-                piece_dir,
-                batch_num,
-                lens,
-                spec_block=piece_spec,
-                hidden_block=piece_hidden,
-            )
-
-        # The pieces are independent calls, so they run CONCURRENTLY — serially
-        # a split cost one full model latency per piece, and it does so from
-        # inside a fan-out worker that is already holding a slot, which on a run
-        # where most lenses split is the largest wall-clock multiplier there is.
-        #
-        # In a POOL OF ITS OWN, deliberately, never back into the global fan-out
-        # pool: this code runs on one of that pool's workers, and a worker that
-        # submits to its own pool and then blocks on the result deadlocks the
-        # moment the pool is saturated — every worker waiting on work that only a
-        # free worker could start. A private executor makes that impossible by
-        # construction rather than by argument. It costs at most `width` threads
-        # for the duration of one split, and a split is the exceptional path.
-        #
-        # Width is the review's own concurrency (never the piece count), so a
-        # user who has told us what their backend can take — `max_concurrency`,
-        # which on a local server is how they describe its parallelism — gets
-        # that answer in both pools rather than one setting meaning two things.
-        # At width 1 the executor runs them in submission order, exactly as the
-        # serial loop did. A splitting worker is blocked, not calling, so the
-        # calls in flight peak at the fan-out's width times this one — the
-        # adapter's backoff absorbs that burst, and it only happens on the run
-        # where every lens is already failing.
-        findings: list[ReviewFinding] = []
-        errors: list[str] = []
-        width = min(len(pieces), run.concurrency)
-        with ThreadPoolExecutor(max_workers=width, thread_name_prefix="lgtmaybe-split") as pool:
-            # map() yields in submission order, so the pieces' findings and the
-            # reported error stay deterministic however the calls interleave.
-            outcomes = list(pool.map(review_piece, pieces))
-        for piece_findings, piece_error in outcomes:
-            findings.extend(piece_findings)
-            if piece_error is not None:
-                errors.append(piece_error)
-        if len(errors) < len(pieces):
-            # At least one piece answered, so the shrink did produce a review —
-            # only then is "reviewed in smaller pieces" a true claim.
-            run.state.split_batches.add(batch_num)
-        # ANY failed piece is still a failed call. Swallowing it because a sibling
-        # succeeded would drop the incomplete-results notice while the summary
-        # claimed the batch was reviewed — a clean bill of health for code no model
-        # ever saw. The last error is reported (the split's own failure, not the
-        # original timeout) so the notice names what actually went wrong.
-        #
-        # Whether the rescue wave may have this one turns on WHY the piece failed,
-        # and the two answers are opposite:
-        #
-        # - A piece that ran out of room again (:class:`_PayloadReason`) is
-        #   reported plain. The split is already this call's retry, and it retried
-        #   with the one change that can help — a smaller payload. Re-sending the
-        #   original oversized request is the "identical request against an
-        #   identical budget" the adapter refuses to repeat, at twice the calls.
-        # - A piece that failed on the PROVIDER — a capacity 429, a 5xx, a stalled
-        #   connection — says nothing about size. One more go after the wave has
-        #   drained is exactly what it needs — for THAT piece alone, which is
-        #   what :class:`_PiecesReason` hands the rescue wave.
-        #
-        # Collapsing the two is the bug this replaces: every split failure was
-        # reported plain, so a transient blip inside a piece silently forfeited
-        # the rescue the same blip would have got anywhere else.
-        if not errors:
-            return findings, None
-        # The message and the retryability come from different places, and reading
-        # both off the last error conflates them: a piece that failed on the
-        # provider followed by one that ran out of room reports a payload reason
-        # last, and the provider failure — the case this exists to rescue — would
-        # lose its turn behind it. So the MESSAGE is the last error (the split's
-        # own failure, which is what the notice should name), while retryability
-        # is a property of ANY piece having faltered provider-side.
-        last = errors[-1]
-        flaky = [piece for piece, (_, e) in zip(pieces, outcomes, strict=True) if _provider_side(e)]
-        if not flaky:
-            return findings, str(last)
-        settled = [e for e in errors if not _provider_side(e)]
-
-        def retry() -> _LensOutcome:
-            # Serial: this runs on a rescue worker, and that wave is narrow on
-            # purpose (see _RESCUE_WORKERS). Plain errors out — the rescue is
-            # one wave, so its outcome is never rescued again.
-            again = [review_piece(piece) for piece in flaky]
-            if any(error is None for _, error in again):
-                run.state.split_batches.add(batch_num)
-            remaining = settled + [error for _, error in again if error is not None]
-            return [f for found, _ in again for f in found], (
-                str(remaining[-1]) if remaining else None
-            )
-
-        reason = _PiecesReason(last)
-        reason.retry = retry
-        return findings, reason
-
-    def _retry_lower_effort(
-        self,
-        messages: list[Message],
-        response_format: type[ReviewResult] | None,
-        batch_num: int,
-        lens: _Lens,
-        reason: str,
-        run: _Run,
-    ) -> _LensOutcome:
-        """Re-run one lens once with its reasoning effort stepped down a level.
-
-        The missing sibling of :meth:`_review_split`. Both start from the same
-        failure — the answer hit the output ceiling — and the diagnosis decides
-        which remedy applies: a payload-bound truncation shrinks the payload, a
-        reasoning-bound one cannot (halving the diff does not halve the thinking),
-        so it changes the only variable that does move a thinking budget.
-
-        Without this, the reasoning branch diagnosed correctly and then stopped,
-        losing the lens for that round — a real dogfood review reviewed its tests
-        and documentation with nothing at all, and the message it left named a
-        knob for the reader to turn by hand next time.
-
-        Bounded exactly like the split:
-
-        - **One attempt.** The retry runs with ``effort`` set, and that is the
-          same flag :meth:`_complete_lens` checks before offering a step-down —
-          so a retry that truncates the same way reports plain.
-        - **Down, never up**, one level, and only where
-          :func:`_reasoning_exhausted_reason` already fired.
-        - **No split, no deferral** on the retry (both callbacks are None): the
-          payload was never the problem.
-        - **Nothing when the effort is unset.** The adapter answers None for the
-          library default, so a user who never configured it pays nothing and
-          sends byte-identical requests.
-        - **Every whole-review ceiling still applies.** ``_skip_reason`` is
-          re-checked before the call, exactly as ``_review_split``'s pieces do by
-          re-entering ``_review_lens`` — this path reaches ``_complete_lens``
-          directly, so it has to make that check itself. A retry that would begin
-          past the deadline, the token budget or a termination signal reports the
-          truncation it already had instead of spending past a stop.
-
-        Returns the retry's ``(findings, error)``. The cut call's salvage is
-        merged by the caller, exactly as the split's is.
-        """
-        # An optional capability, like `post_issue_comment` on the GitHub side:
-        # the effort lives in provider-shaped opts (a flat `reasoning_effort`,
-        # or OpenRouter's nested `reasoning` object), and the engine has no
-        # business knowing which. A provider without it simply never steps down.
-        if _skip_reason(run, lens) is not None:
-            # Past a ceiling: the run is already stopping, and the notice it will
-            # carry is the truncation's, not a skip's — this call never happened.
-            return [], reason
-        recovery = self._recovery()
-        step_down = recovery.lower_reasoning_effort() if recovery is not None else None
-        if not step_down:
-            return [], reason
-        _log.warning(
-            "retrying the lens once at a lower reasoning effort",
-            extra={"lens": lens.id, "batch": batch_num, "effort": step_down},
-        )
-        findings, error = self._complete_lens(
-            messages, response_format, batch_num, lens, None, None, effort=step_down, run=run
-        )
-        if error is None:
-            # Recorded on the way OUT, not the way in: the notice claims findings
-            # came from the lower setting, and a retry that truncated again
-            # produced no such findings. That run reports the failure it already
-            # had — claiming a recovery on top of it would be two wrong notices.
-            run.state.stepped_down.add(lens.id)
-            return findings, error
-        if not isinstance(error, _ReasoningBoundReason):
-            # The lower effort cut for some OTHER reason — the answer outgrew the
-            # ceiling, a quota, a refused request. Thinking less again is not the
-            # remedy for any of those, and the caller decides what is.
-            return findings, error
-        # The graded step landed nowhere: the same ceiling, spent the same way.
-        # Measured on GLM 5.3 through OpenRouter (a large PR, three rounds), where
-        # `low` and `minimal` both spent the whole 12,288 ceiling on thought in
-        # 10 retries of 11, and the fallback model then did the same at ten times
-        # the price. A model whose thinking is a switch does not answer to a
-        # dial, so the one further step is to off — and it is taken BEFORE the
-        # model changes, because switching model says nothing about the failure.
-        switch_off = recovery.disable_reasoning() if recovery is not None else None
-        if not switch_off or switch_off == step_down:
-            # No switch on this route, or the step-down already was it (a
-            # configured `minimal` steps to `none`): a second request at the
-            # same setting is the byte-identical call that just failed.
-            return findings, error
-        if _skip_reason(run, lens) is not None:
-            return findings, error
-        _log.warning(
-            "the lower effort exhausted the ceiling too — retrying once with reasoning off",
-            extra={"lens": lens.id, "batch": batch_num, "effort": switch_off},
-        )
-        more, error = self._complete_lens(
-            messages,
-            response_format,
-            batch_num,
-            lens,
-            None,
-            None,
-            effort=switch_off,
-            run=run,
-        )
-        if error is None:
-            run.state.reasoning_off.add(lens.id)
-        return findings + more, error
-
-    def _escalate_model(
-        self,
-        messages: list[Message],
-        response_format: type[ReviewResult] | None,
-        batch_num: int,
-        lens: _Lens,
-        reason: str,
-        run: _Run,
-    ) -> _LensOutcome:
-        """Re-run one lens once on the configured fallback model.
-
-        The last rung of the truncation ladder, and the only one that changes the
-        MODEL. Its siblings — :meth:`_review_split` for a payload-bound
-        truncation, :meth:`_retry_lower_effort` for a reasoning-bound one — both
-        act on what the token counts actually said went wrong, and both stay on
-        the model the user chose. This one says nothing about the failure at all:
-        it re-sends the same request at the same ceiling and hopes a second model
-        finishes it.
-
-        So it goes LAST. The adapter used to take it first — its own fallback
-        fired the moment the primary truncated, which meant the two aimed
-        remedies never ran and every truncation cost a second model's full
-        ceiling. Lens calls now carry ``defer_truncation``, which hands the
-        failure back here instead (see ``LiteLLMProvider.complete``).
-
-        Bounded exactly like the retries beside it:
-
-        - **One attempt, and no ladder of its own.** The call goes out with
-          ``on_oversized``/``on_needs`` None — the same condition that stops a
-          split piece recursing — and with the step-down and the unparseable
-          recoveries off. Every one of those re-runs would go out on the PRIMARY,
-          which is the model that just failed this lens.
-        - **The batch's to spend, not a piece's.** Only a call still holding an
-          ``on_oversized`` reaches here, so a split whose pieces all failed buys
-          ONE fallback call for the batch rather than one per piece.
-        - **Nothing when no fallback is configured.** ``escalate_model`` answering
-          None returns the reason unchanged, so a run without a second model
-          sends byte-identical requests and pays exactly what it paid before.
-        - **Every whole-review ceiling still applies.** ``_skip_reason`` is
-          re-checked first: a run already past its deadline, token budget or a
-          termination signal reports the truncation it has rather than spending
-          past a stop.
-
-        Nothing is recorded here. The disclosure is read off the answering model
-        on the result (:meth:`_note_answering_model`), which also catches the
-        adapter switching model on its own for a failure that never reaches this.
-        """
-        if _skip_reason(run, lens) is not None:
-            return [], reason
-        # A recovery step, like `lower_reasoning_effort`: which litellm model
-        # string a configured fallback resolves to is the adapter's knowledge,
-        # and a provider without a second model answers None.
-        recovery = self._recovery()
-        target = recovery.escalate_model() if recovery is not None else None
-        if not target:
-            return [], reason
-        _log.warning(
-            "re-running the lens once on the fallback model",
-            extra={"lens": lens.id, "batch": batch_num, "fallback_model": target},
-        )
-        return self._complete_lens(
-            messages,
-            response_format,
-            batch_num,
-            lens,
-            None,
-            None,
-            escalate_to=target,
-            # No unparseable recovery either: both re-runs it could start
-            # (`repair_findings`, `_retry_without_schema`) go out on the primary,
-            # which is the model that just failed this lens.
-            recover=False,
-            run=run,
-        )
-
-    def _note_answering_model(self, result: ProviderResult, lens: _Lens, run: _Run) -> None:
-        """Record that a model other than the primary produced this result.
-
-        Read off the result rather than stamped at the call site because the
-        engine is not the only thing that switches model: the adapter still falls
-        back on its own for every failure that is not a truncation, and from up
-        here that call is indistinguishable from an ordinary success. Recording
-        only the escalations the engine drove would disclose half the rescues and
-        leave the other half silent — which is the state this replaces.
-
-        Fail-closed on both sides: an adapter or fake that reports neither model
-        notes nothing, because "a second model answered" is a claim, and one that
-        cannot be proved should not be made.
-        """
-        answered = result.model
-        # The adapter's resolved primary, not `run.model`: the result names the
-        # litellm model string, which the raw configured name never equals.
-        recovery = self._recovery()
-        asked = recovery.model if recovery is not None else None
-        if answered and asked and answered != asked:
-            run.state.escalated[lens.id] = answered
-
-    def _retry_without_schema(
-        self,
-        messages: list[Message],
-        model: str,
-        batch_num: int,
-        lens: _Lens,
-        reason: str,
-        run: _Run,
-    ) -> _LensOutcome:
-        """Re-run one lens once with provider-native schema enforcement off.
-
-        The third structured-output fallback, and the only one the adapter could
-        not have found for itself. It already handles a provider that *rejects*
-        ``response_format`` (a 400 naming the param) and one whose schema mode
-        decodes to an *empty* string. A reply that arrives non-empty, well-formed
-        on the wire, and simply is not findings looks like a clean success from
-        down there — only the parser knows better.
-
-        The theory this acts on: the prompt asks for the findings JSON regardless
-        of the schema, and the parser is lenient about fences, prose wrappers and
-        trailing commas, so a model whose constrained decoding produced something
-        unusable may well answer perfectly without it. Two Claude models did
-        exactly this through OpenRouter, losing every lens in an observation.
-
-        Bounded like the step-down beside it:
-
-        - **One attempt.** ``recover=False`` marks the re-run, and that is the
-          same flag the unparseable branch checks before offering a recovery, so
-          a re-run that fails reports plain rather than reformatting again.
-        - **Only after the cheap salvage.** The reformat call sends no diff and
-          costs a fraction of this; ordering by cost is deliberate.
-        - **Only where a schema was actually sent.** With ``structured_output``
-          off there is no enforcement to blame and the re-run would be the
-          byte-identical request the rescue wave forbids.
-        - **No split, no deferral** (both callbacks None): the payload was never
-          the problem.
-        - **Every whole-review ceiling still applies** — ``_skip_reason`` is
-          re-checked here because the reformat before it already spent a call.
-
-        A re-run that *works* is evidence, not noise: the model is told to stop
-        sending the schema, so later batches skip the two wasted calls instead of
-        rediscovering this. A re-run that fails proves nothing — one bad reply is
-        not a broken schema mode, and disabling it for the rest of the run would
-        be a quality regression on every later call — so nothing is remembered.
-        """
-        if _skip_reason(run, lens) is not None:
-            return [], reason
-        _log.warning(
-            "re-asking the lens without the provider's JSON schema",
-            extra={"lens": lens.id, "batch": batch_num},
-        )
-        findings, error = self._complete_lens(
-            messages, None, batch_num, lens, None, None, recover=False, run=run
-        )
-        if error is None:
-            # Recorded on the way OUT, like the step-down: a re-run that failed
-            # too produced no findings to claim, and marking the model off the
-            # back of it would disable structured output on a guess.
-            run.state.re_asked.add(lens.id)
-            self._drop_response_format(model)
-        return findings, error
-
-    def _sends_response_format(self, model: str) -> bool:
-        """Whether the schema this call asked for actually reached the provider.
-
-        Passing ``response_format`` is not the same as sending it: the adapter
-        strips it for a model that has already refused it (a 400, or schema mode
-        decoding to nothing), and from here that call looks identical to one
-        made under enforcement. Re-running such a lens "without the schema"
-        would re-send the request that just failed, byte for byte — a wasted
-        full-diff call, and exactly what ``engine.rescue`` forbids.
-
-        Probed through ``SupportsRecovery`` and **fail-open**, like every other
-        adapter probe: an adapter that cannot answer is assumed to have sent what
-        it was given, so the recovery keeps working rather than silently
-        switching itself off.
-        """
-        recovery = self._recovery()
-        if recovery is None:
-            return True
-        return bool(recovery.sends_response_format(model))
-
-    def _drop_response_format(self, model: str) -> None:
-        """Tell the adapter this model's schema mode is not working.
-
-        Probed through ``SupportsRecovery``, and the one recovery step that
-        WRITES. It stays off the frozen ``ProviderClient`` port for the same
-        reason the read-only ones do: the knowledge is adapter-shaped (which
-        litellm model string keys the drop), and a provider that cannot honour it
-        should simply not remember rather than every fake in the suite growing a
-        no-op.
-        """
-        recovery = self._recovery()
-        if recovery is not None:
-            recovery.drop_response_format(model, "unparseable-output")
-
-    def _stamp_and_bound(
-        self, findings: list[ReviewFinding], lens: _Lens, run: _Run
-    ) -> list[ReviewFinding]:
-        """Stamp the originating lens, then bound what one call may contribute.
-
-        Both apply to every (batch, lens) result: the normal path, a repaired
-        reply and a salvaged truncation. They are applied here rather than at
-        each return so the three paths cannot diverge. The bound is a backstop
-        against a degenerate response rather than a review budget; see
-        `ReviewConfig.max_findings_per_lens`.
-        """
-        findings = _stamp_categories(findings, lens)
-        # A finding whose prose is the model's note to itself about its output
-        # format is corrupted output, not a review — and it is imperative text,
-        # which must never reach a thread that agents read as instructions.
-        # Dropped first so it cannot take a slot from a genuine finding below.
-        findings, self_talk = drop_self_talk(findings)
-        if self_talk:
-            run.state.add_self_talk(lens.id, len(self_talk))
-            _log.warning(
-                "dropped findings carrying the model's own repair note",
-                extra={
-                    "lens": lens.id,
-                    "dropped": len(self_talk),
-                    "titles": [f.title[:120] for f in self_talk],
-                },
-            )
-        cap = run.cfg.max_findings_per_lens
-        if not cap or len(findings) <= cap:
-            return findings
-        # Highest severity first, input order preserved within a severity, so
-        # what survives is deterministic and provider-independent. This is the
-        # same selection policy `_dedupe` uses.
-        kept = sorted(findings, key=lambda f: -f.severity.rank)[:cap]
-        dropped = len(findings) - len(kept)
-        run.state.add_flooded(lens.id, dropped)
-        _log.warning(
-            "lens exceeded the per-lens finding bound — dropping the least severe",
-            extra={"lens": lens.id, "returned": len(findings), "kept": cap, "dropped": dropped},
-        )
-        return kept
-
     def _complete_lens(
         self,
         messages: list[Message],
@@ -2822,6 +1030,10 @@ class LLMReviewEngine:
     ) -> tuple[list[ReviewFinding], str | None]:
         """The provider call + parse + stamp shared by both prompt shapes.
 
+        A failure goes to the recovery ladder (``recovery._Ladder``): a raised
+        call to ``_call_failed``, a reply that did not parse to ``_unparseable``,
+        and one whose body stopped mid-answer to ``_cut_off``.
+
         ``on_oversized`` handles the failures that say something about the
         *payload* rather than the provider: the call outlived its entire budget,
         or its answer hit the model's output ceiling. Both mean one call was
@@ -2836,20 +1048,11 @@ class LLMReviewEngine:
         means a ``needs`` in the response is simply ignored — nothing is parsed
         for it, so a review without the feature costs exactly what it did before.
 
-        ``effort`` carries the per-call reasoning override of a step-down retry
-        (see :meth:`_retry_lower_effort`). Not None also MARKS this call as that
-        retry, which is what bounds it to one: the step-down is only ever offered
-        to a call that has not already taken it.
-
-        ``recover`` is the same idea for the unparseable path: False marks a call
-        that IS a recovery, so it may not start another. Set only by
-        :meth:`_retry_without_schema`, which is the second and last level.
-
-        ``escalate_to`` names the fallback model this one call should run on. Set
-        only by :meth:`_escalate_model`; it reaches the adapter as
-        ``model_override``, which also stops the adapter falling back from a call
-        that already is the fallback.
+        ``effort``, ``recover`` and ``escalate_to`` mark a call that a rung of
+        the ladder issued, which bounds each rung to one attempt; see
+        ``recovery._Reissue``.
         """
+        ladder = self._ladder()
         opts: dict[str, Any] = {"response_format": response_format} if response_format else {}
         if effort is not None:
             opts.update(effort)
@@ -2867,173 +1070,9 @@ class LLMReviewEngine:
         try:
             result = run.provider.complete(messages, model=run.model, **opts)
         except Exception as exc:
-            # Retryable by default: this is the provider faltering, not us, so the
-            # rescue wave gets one more go once the fan-out has drained. Two
-            # exceptions, both because the second call is guaranteed to buy the
-            # same answer at full price:
-            #
-            # - a truncation is a blown output CEILING, and the identical request
-            #   runs to the identical ceiling;
-            # - a failure the adapter stamped UNRECOVERABLE — a dead key, a spent
-            #   quota, a refused request — cannot resolve itself mid-review. The
-            #   adapter already made that judgement to decide its own retries;
-            #   re-deriving it here from the message text would be a second copy
-            #   of the rule, drifting from the first.
-            reason: str = _error_reason(exc)
-            if not isinstance(
-                exc, ProviderTruncated | ProviderInputTooLarge
-            ) and not is_unrecoverable(exc):
-                # A wall timeout is retryable, but it is also the signal the split
-                # acts on, so it is marked as such — see _PayloadReason.
-                mark = _PayloadReason if isinstance(exc, ProviderWallTimeout) else _RetryableReason
-                reason = mark(reason)
-            profiler.record_error(lens.id, batch_num, time.perf_counter() - started, exc, reason)
-            _log.warning(
-                "review call failed",
-                extra={"lens": lens.id, "reason": reason},
-                exc_info=True,
-            )
-            if isinstance(exc, ProviderWallTimeout | ProviderTruncated | ProviderInputTooLarge):
-                # Three payload-sized failures, one remedy: ran out of time, ran
-                # out of room to answer, ran out of room to ask. A refused prompt
-                # (the model's context window) has no partial answer and no
-                # reasoning breakdown, so the salvage and the exhaustion check
-                # below are no-ops for it and it goes straight to the split.
-                #
-                # Whatever the model finished before the ceiling cut it off is real,
-                # schema-valid work — kept, exactly as the parse path keeps it, so
-                # the exception path is not the one place a partial answer is binned.
-                #
-                # The counts come off the exception only when it is a truncation:
-                # a call that spent its ceiling HAS no ceiling left, so its
-                # `output_tokens` is the denominator. The other two carry neither.
-                reasoning, spent = (
-                    (exc.reasoning_tokens, exc.output_tokens)
-                    if isinstance(exc, ProviderTruncated)
-                    else (None, None)
-                )
-                return self._remedy_oversized(
-                    self._stamp_and_bound(_salvage_truncated(exc, lens), lens, run),
-                    reason,
-                    _reasoning_exhausted_reason(reasoning, spent),
-                    messages=messages,
-                    response_format=response_format,
-                    batch_num=batch_num,
-                    lens=lens,
-                    run=run,
-                    on_oversized=on_oversized,
-                    effort=effort,
-                    escalate_to=escalate_to,
-                    # A refused prompt may cut inside a lone hunk (see
-                    # _split_batch): input size is the whole of that failure, so a
-                    # smaller slice is guaranteed to help where for the other two
-                    # it is a guess.
-                    slice_hunks=isinstance(exc, ProviderInputTooLarge),
-                )
-            return [], reason
-        elapsed = time.perf_counter() - started
-        self._note_answering_model(result, lens, run)
-        salvaged = 0
-        try:
-            findings = parse_findings(result.text)
-        except ParseError as exc:
-            if not exc.truncated:
-                reason = _unparseable_reason(
-                    exc, lens.id, result.text, schema_mode=response_format is not None
-                )
-                profiler.record_result(lens.id, batch_num, elapsed, result, error=reason)
-                # Two recoveries, cheapest first, and `recover` gates BOTH: the
-                # schema-less re-run below re-enters here with it False, so a
-                # failing retry reports plain instead of starting its own
-                # reformat. One flag, because both are the same judgement —
-                # "may this failed call spend another one?".
-                #
-                # Ceilings are re-checked first: these are new model calls, and a
-                # run already past its deadline or budget must not start one.
-                if recover and _skip_reason(run, lens) is None:
-                    # 1. One reformat attempt at the answer the model already
-                    #    produced and was already billed for. A DIFFERENT request
-                    #    — the reply plus the schema, no diff — which is why it
-                    #    does not fall under the rule that an unparseable call is
-                    #    never re-run: that rule is about re-issuing the identical
-                    #    request at temperature 0.
-                    repaired = repair_findings(
-                        run.provider, run.cfg, result.text, exc.shape, lens.id
-                    )
-                    if repaired is not None:
-                        # Complete, not partial: nothing is missing, so this must
-                        # not trip the incomplete notice. Reported through its own
-                        # notice instead, like a lens that stepped its reasoning
-                        # effort down — successful, but worth saying out loud.
-                        run.state.repaired.add(lens.id)
-                        return self._stamp_and_bound(repaired, lens, run), None
-                    # 2. The reformat could not do it either. If this call sent
-                    #    the provider's schema, that enforcement is the remaining
-                    #    suspect — re-run the lens once without it.
-                    if (
-                        response_format is not None
-                        and run.cfg.retry_without_schema
-                        and self._sends_response_format(run.model)
-                    ):
-                        retried, retry_error = self._retry_without_schema(
-                            messages, run.model, batch_num, lens, reason, run
-                        )
-                        if retry_error is None:
-                            return retried, None
-                        return retried, reason
-                return [], reason
-            # A response cut off at the output ceiling is not a badly-behaved
-            # model, and saying "unparseable" sends the reader looking for a
-            # prompt bug instead of the ceiling they hit. The notice on the PR is
-            # the only place this is ever seen, so it names which fault it was —
-            # and how much of the lens survived, because "3 findings recovered"
-            # and "0 recovered" are very different states to be told about.
-            salvaged = len(exc.recovered)
-            recovered_note = (
-                f"; {salvaged} finding{_plural(salvaged)} completed before the cut "
-                f"{_plural(salvaged, 'is', 'are')} included"
-                if salvaged
-                else ""
-            )
-            # Deliberately NOT worded as a `max_tokens` hit. The adapter's error
-            # says that because it has proof — a `length` finish reason, or a
-            # response that spent a ceiling we set. Here there is none: the route
-            # called this a clean finish and the body simply stops, which can mean
-            # a cap the route never mentions or a generation that fell over. The
-            # old wording asserted the ceiling anyway and printed `output_tokens`
-            # as if it were that ceiling, sending the reader to raise a number
-            # that may not be the one they hit.
-            reason = (
-                f"response truncated: the body stopped mid-answer after "
-                f"{result.output_tokens} output tokens while the route reported a clean "
-                "finish, so the cut was detected from the unterminated body; the batch is "
-                f"re-reviewed in smaller pieces automatically{recovered_note}"
-            )
-            _log.warning(reason, extra={"lens": lens.id, "recovered": salvaged})
-            profiler.record_result(
-                lens.id,
-                batch_num,
-                elapsed,
-                result,
-                findings=salvaged,
-                error=reason,
-            )
-            # Same failure as the adapter-detected one, so the same ladder — this
-            # is the wire that was missing. The salvage is stamped like any other
-            # finding and rides along; the reason travels with it and is cleared
-            # only if a rung actually covers the batch, so a half-answer is never
-            # read as a clean bill of health.
-            #
-            # `slice_hunks` stays False: this is a cut on the way OUT, and unlike
-            # a refused prompt it gives no reason to believe a lone hunk is the
-            # unit that must shrink.
-            return self._remedy_oversized(
-                self._stamp_and_bound(exc.recovered, lens, run),
-                reason,
-                # The share that decides whether covering less can help, read off
-                # the ceiling the request CARRIED — `output_tokens` here is
-                # wherever the body happened to stop, which is a share of nothing.
-                _reasoning_exhausted_reason(result.reasoning_tokens, result.output_ceiling),
+            return ladder._call_failed(
+                exc,
+                started,
                 messages=messages,
                 response_format=response_format,
                 batch_num=batch_num,
@@ -3043,7 +1082,37 @@ class LLMReviewEngine:
                 effort=effort,
                 escalate_to=escalate_to,
             )
-        findings = self._stamp_and_bound(findings, lens, run)
+        elapsed = time.perf_counter() - started
+        ladder._note_answering_model(result, lens, run)
+        try:
+            findings = parse_findings(result.text)
+        except ParseError as exc:
+            if not exc.truncated:
+                return ladder._unparseable(
+                    exc,
+                    result,
+                    elapsed,
+                    messages=messages,
+                    response_format=response_format,
+                    batch_num=batch_num,
+                    lens=lens,
+                    run=run,
+                    recover=recover,
+                )
+            return ladder._cut_off(
+                exc,
+                result,
+                elapsed,
+                messages=messages,
+                response_format=response_format,
+                batch_num=batch_num,
+                lens=lens,
+                run=run,
+                on_oversized=on_oversized,
+                effort=effort,
+                escalate_to=escalate_to,
+            )
+        findings = _stamp_and_bound(findings, lens, run)
         profiler.record_result(
             lens.id,
             batch_num,
@@ -3057,542 +1126,6 @@ class LLMReviewEngine:
                 return on_needs(needs, findings)
         _log.info("lens reviewed", extra={"lens": lens.id, "findings": len(findings)})
         return findings, None
-
-
-def _reasoning_exhausted_reason(reasoning: int | None, ceiling: int | None) -> str | None:
-    """Why splitting this failure cannot help, or None when it still can.
-
-    A truncation normally means the payload asked for more answer than one
-    response could hold, and the remedy is to cover less. Not when the ceiling
-    went on *thought*: a reasoning model draws its thinking from the same
-    `max_tokens` budget, and halving the diff does not halve the thinking. The
-    observed proof is a fifteen-line diff truncating at the same ceiling as a
-    thousand-line one. Splitting there re-spends the whole ceiling on every piece
-    and fails identically — pure added latency on a review that is already slow.
-
-    Decided from the numbers the adapter measured, never from its message: this
-    reads the diagnosis as data, exactly as the structured findings contract
-    requires. Both counts are needed — the reasoning spend is meaningless without
-    the ceiling it is a share of — so a route that reports neither keeps the split
-    it has always had.
-
-    Takes the two counts rather than the failure that carried them, because the
-    same judgement is now made on two paths and they hold them differently. A
-    ``ProviderTruncated`` spent its ceiling by definition, so its `output_tokens`
-    IS the denominator; a response the route called finished stopped somewhere
-    short of one, so its denominator is the `output_ceiling` the request was sent
-    with. Reading `output_tokens` on that second path would compare the thinking
-    against however much the model happened to write, which is not a share of
-    anything. Callers that hold no counts at all — a wall timeout, a refused
-    prompt — pass None and keep their split.
-
-    The returned reason replaces the adapter's, which promises a split this
-    failure is not going to get and warns that a higher ceiling makes things
-    worse — true of the content runaway it was written for, and the wrong half
-    of the advice here. Both levers are named instead, because these numbers
-    cannot say which one is the fix.
-    Thinking that *expands to fill* whatever ceiling it is given is immune to a
-    bigger cap — the case recorded above, where the effort is the only move.
-    Thinking with a bounded natural size that merely exceeds this ceiling looks
-    identical here and is the opposite case: the cap fixes it outright, and
-    lowering the effort pays for the fix in review quality instead. Only a
-    re-run at a higher cap separates them, so the reader is handed the choice
-    rather than one of the two asserted as proven.
-    """
-    if not reasoning or not ceiling:
-        return None
-    if reasoning < ceiling * _REASONING_DOMINANT_SHARE:
-        return None
-    # The literal name, not `type(exc).__name__`: every reason the engine reports
-    # reads as "<Fault>: <what happened>", and this diagnosis is now reached both
-    # from a response the adapter raised on and from one only the parser caught.
-    # The second has no exception to take a name from, and the fault it describes
-    # is the same one either way.
-    return _ReasoningBoundReason(
-        f"ProviderTruncated: spent {reasoning} of the {ceiling}-token `max_tokens` "
-        "ceiling on reasoning, so the batch was not split: a smaller payload cannot "
-        "shrink a thinking budget. Lower `reasoning_effort`, or raise `max_tokens` if "
-        "this model simply thinks bigger than the ceiling"
-    )
-
-
-def _salvage_truncated(exc: BaseException, lens: _Lens) -> list[ReviewFinding]:
-    """Findings the model completed before the output ceiling cut it off.
-
-    The adapter raises the ceiling as its own failure and carries the cut-off body
-    with it, so the salvage the parser already performs on a truncation it detects
-    itself is available here too. Anything else (a wall timeout has no body at all)
-    salvages nothing, and an unparseable remnant is simply empty — never a guess.
-    """
-    if not isinstance(exc, ProviderTruncated) or not exc.text:
-        return []
-    try:
-        findings = parse_findings(exc.text)
-    except ParseError as parse_exc:
-        findings = parse_exc.recovered
-    if findings:
-        _log.info("salvaged findings from truncated response", extra={"lens": lens.id})
-    return findings
-
-
-def _stamp_categories(findings: list[ReviewFinding], lens: _Lens) -> list[ReviewFinding]:
-    """Stamp the originating lens on each finding (engine-derived).
-
-    It drives the security label and category-matched `finding_rules`, and
-    surfaces in JSON output. A focused lens overwrites the model's value
-    outright; a merged (fast-preset) lens covers several categories, so a
-    model-supplied value from its member set is kept and anything else falls
-    back to the lens id. Applied to salvaged findings too — a finding recovered
-    from a truncated response is posted like any other, so it must be labelled
-    like any other.
-    """
-    allowed = lens.allowed_categories
-    stamped = [
-        f.model_copy(
-            update={
-                "category": (
-                    f.category if allowed is not None and f.category in allowed else lens.id
-                )
-            }
-        )
-        for f in findings
-    ]
-    # Now that each finding knows which lens it came from, hold the advisory
-    # ones to the grade the prompt asked them for. Before the per-lens bound
-    # below, which drops the least severe first: an over-graded nit would
-    # otherwise survive at the expense of a real finding.
-    return clamp_to_category_ceiling(stamped)
-
-
-def _summary_line(
-    count: int,
-    cfg: ReviewConfig,
-    risk: RiskAssessment | None = None,
-    *,
-    temperature_dropped: bool = False,
-    stack: PRStack | None = None,
-) -> str:
-    """The review summary line: the user's template, or the built-in default.
-
-    A template that fails to format (unknown placeholder, stray brace) is
-    logged and falls back to the default — a cosmetic option must never fail
-    a review. ``{risk}`` renders the risk-of-change segment (empty when off);
-    ``{temperature}`` likewise renders ``temperature not sent`` when the
-    configured temperature never reached the model, and nothing otherwise.
-    ``{stack}`` renders the PR's layer in a stack of pull requests ("layer 2 of
-    3 in a stack"), and nothing outside a stack.
-    """
-    version = package_version()
-    segment = risk_segment(risk) if risk is not None else ""
-    stack_segment = _stack_segment(stack)
-    temperature = _TEMPERATURE_SEGMENT if temperature_dropped else ""
-    if cfg.summary_template:
-        try:
-            return cfg.summary_template.format(
-                count=count,
-                provider=cfg.provider.value,
-                model=cfg.model,
-                version=version,
-                risk=segment,
-                stack=stack_segment,
-                temperature=temperature,
-            )
-        except (KeyError, IndexError, ValueError) as exc:
-            _log.warning(
-                "summary_template failed to format — using the default",
-                extra={"error": str(exc)},
-            )
-    plural = _plural(count)
-    risk_part = f" · {segment}" if segment else ""
-    stack_part = f" · {stack_segment}" if stack_segment else ""
-    temperature_part = f" · {temperature}" if temperature else ""
-    return (
-        f"{count} finding{plural}{risk_part}{stack_part} · provider {cfg.provider} · "
-        f"model {cfg.model}{temperature_part} · lgtmaybe {version}"
-    )
-
-
-def _stack_segment(stack: PRStack | None) -> str:
-    """The summary's stack segment: an exact position only when both ends were found."""
-    if stack is None:
-        return ""
-    if stack.complete:
-        return f"layer {stack.position} of {stack.size} in a stack"
-    return f"in a stack of at least {stack.size}"
-
-
-def _redacted_stack(stack: PRStack | None) -> PRStack | None:
-    """*stack* with every title and path redacted, like the diff, before egress."""
-    if stack is None:
-        return None
-
-    def clean(layers: list[StackLayer]) -> list[StackLayer]:
-        return [
-            layer.model_copy(
-                update={
-                    "title": redact(layer.title),
-                    "files": [redact(path) for path in layer.files],
-                }
-            )
-            for layer in layers
-        ]
-
-    return stack.model_copy(
-        update={
-            "base_ref": redact(stack.base_ref),
-            "below": clean(stack.below),
-            "above": clean(stack.above),
-        }
-    )
-
-
-def passes_path_filters(path: str, *, include: list[str], exclude: list[str]) -> bool:
-    """Whether *path* survives the config's glob filters.
-
-    ``include`` is an allowlist (empty = everything included) and ``exclude`` a
-    denylist applied after it — so an exclude always wins. Patterns are fnmatch
-    globs matched against the full path, with one gitignore-style nicety: a
-    ``**/``-prefixed pattern also matches at the repo root (plain fnmatch would
-    demand a literal slash, silently missing ``**/*.lock`` on a root lockfile).
-    """
-    if include and not any(_matches_glob(path, pattern) for pattern in include):
-        return False
-    return not any(_matches_glob(path, pattern) for pattern in exclude)
-
-
-def passes_size_cap(patch: str, max_lines: int) -> bool:
-    """Whether one file's *patch* is small enough to be worth reviewing.
-
-    The companion to the name-based skip filter, which can only recognise a
-    generated file that ADMITS it in its name. A hand-named data blob — a
-    154,000-line index, an 18,000-line snapshot corpus — has no such tell, so
-    size is the deterministic signal left. Counting the patch's own lines (not
-    the file's) keeps the judgement about what this PR actually changed.
-
-    ``max_lines`` of 0 disables the cap.
-    """
-    return not max_lines or patch.count("\n") <= max_lines
-
-
-def _matches_glob(path: str, pattern: str) -> bool:
-    if fnmatchcase(path, pattern):
-        return True
-    return pattern.startswith("**/") and fnmatchcase(path, pattern[3:])
-
-
-def files_not_visible(changed_files: Sequence[str], batch_paths: set[str]) -> list[str]:
-    """The PR's changed files that this batch's diff does NOT show.
-
-    Derived, not captured. One subtraction covers every way a file goes missing
-    before a lens sees it — the hardcoded generated/binary/vendored skip, the
-    include/exclude globs, the ``max_file_diff_lines`` size cap, the
-    ``max_files`` cap, a triage skip, an incremental scope, and simply being in
-    another batch — because it asks what is left of the PR after this batch
-    rather than which filter removed what.
-
-    Capturing at each filter instead would mean six call sites kept in sync,
-    four of which have no pattern list to report (the skip filter is hardcoded
-    rules, the caps are counts, triage is a per-file model verdict) — and it
-    would still miss batching, which has the widest reach of the seven: the intent
-    lens runs once PER BATCH, so on a multi-batch PR every call is judging the
-    whole PR's promise against a fraction of the change.
-
-    ``changed_files`` stays the full PR list even under incremental review (the
-    incremental context replaces only ``diff``), so that case is covered for
-    free — at file granularity. A file present in the increment still hides its
-    *earlier* commits' changes, which this cannot express.
-    """
-    return sorted(set(changed_files) - batch_paths)
-
-
-# Slice of the input budget the committed spec may take. The same eighth the
-# directory-scoped context files get, and for the same reason: this is reference
-# material handed to ONE lens per batch, not the diff under review.
-_SPEC_BUDGET_DIVISOR = 8
-
-
-class _SpecContext(NamedTuple):
-    """What spec resolution decided: the block to send, and what it could not."""
-
-    #: The redacted spec block, or None to skip the spec lens.
-    text: str | None
-    #: Roots of the specs that matched this PR but none of whose files could fit
-    #: the budget on their own. A matched spec that goes unsent is a lens the
-    #: round should have run and did not, which the summary says out loud —
-    #: unlike the ordinary "nothing matched" skip, which is silent by design. A
-    #: spec that lost the budget to a higher-ranked one is not here: it could
-    #: have fit, so the notice's advice would be wrong for it.
-    unfit: tuple[str, ...]
-
-
-def _resolve_spec(cfg: ReviewConfig, ctx: PRContext, root: Path) -> _SpecContext:
-    """The committed spec block for this PR, or a skip — with what did not fit.
-
-    Four deterministic steps — detect, select, read, render — and any of them
-    coming up empty means no spec lens runs at all. Silence is the right answer
-    far more often than not: most repositories commit no spec, and a repository
-    that does may still be seeing a PR that delivers none of them.
-
-    Spec text is read from the workspace (the trusted base branch on
-    ``pull_request_target``) except for files this PR changes, which come from
-    its own head text — a spec is usually committed alongside the code that
-    delivers it. For the same reason the PR's changed paths join the tree
-    ``detect`` walks: on the first PR of a feature the spec directory does not
-    exist on the base branch at all, and detecting only what the workspace holds
-    would skip the lens exactly then. Everything is redacted, including the
-    ticked-task claims, which are mined from the raw diff rather than from an
-    already-redacted file.
-    """
-    skipped = _SpecContext(None, ())
-    if not cfg.spec_review:
-        return skipped
-    bundles = specs.detect(root, cfg.spec_paths, ctx.changed_files)
-    if not bundles:
-        return skipped
-    selected = specs.select(
-        bundles,
-        changed_files=ctx.changed_files,
-        branch=ctx.head_branch,
-        intent_text=_intent_text(ctx),
-    )
-    if not selected:
-        return skipped
-    budget = cfg.max_input_tokens // _SPEC_BUDGET_DIVISOR
-    contents = specs.load_spec_files(
-        selected,
-        root=root,
-        head_texts=ctx.file_contents,
-        budget_tokens=budget,
-    )
-    unfit = specs.unfit_bundles(
-        selected, contents, root=root, head_texts=ctx.file_contents, budget_tokens=budget
-    )
-    if unfit:
-        _log.warning(
-            "matched spec did not fit the spec budget",
-            extra={"specs": list(unfit), "budget_tokens": budget},
-        )
-    text = specs.build_spec_text(selected, contents, claims=specs.ticked_tasks(ctx.diff))
-    if text is None:
-        _log.info("spec lens skipped — no spec text fit the budget")
-        return _SpecContext(None, unfit)
-    _log.info(
-        "spec lens enabled",
-        extra={"specs": [b.root for b in selected], "files": sorted(contents)},
-    )
-    return _SpecContext(redact(text), unfit)
-
-
-def _lenses_marker(lenses: Sequence[_Lens], failed_lenses: Sequence[str]) -> str:
-    """The hidden marker naming every lens that completed all of its calls.
-
-    A lens with any failed or skipped call is left out: the failure notice
-    already names it, and a gate reading this marker wants the lenses whose
-    verdict it can rely on, not the ones that were merely attempted.
-    """
-    completed = sorted({lens.id for lens in lenses} - set(failed_lenses))
-    return f"{LENSES_MARKER_PREFIX}{','.join(completed)} -->"
-
-
-def _intent_text(ctx: PRContext) -> str:
-    """The PR's stated intent as one labelled text block, or "" when none is stated.
-
-    Title + description come from a GitHub PR; commit names (first lines) come
-    from either the PR's commit list or local ``git log`` — so the intent lens
-    works the same on the CLI as on a PR.
-    """
-    parts: list[str] = []
-    if ctx.title.strip():
-        parts.append(f"Title: {ctx.title.strip()}")
-    if ctx.description.strip():
-        parts.append(f"Description:\n{ctx.description.strip()}")
-    subjects = [s.strip() for s in ctx.commit_messages if s.strip()]
-    if subjects:
-        parts.append("Commit messages:\n" + "\n".join(f"- {s}" for s in subjects))
-    return "\n\n".join(parts)
-
-
-# How much of an unparseable reply is logged at DEBUG. Head *and* tail: a prose
-# preamble shows at the top and an unclosed container or a stray fence at the
-# bottom, and the two are different diagnoses. The observed failures ran
-# 676–1,201 tokens (roughly 2.7–4.8 KB), so this captures most of them whole —
-# and `response_chars` always reports the true length, so a cap never hides how
-# much was left out.
-_RAW_HEAD_CHARS = 2000
-_RAW_TAIL_CHARS = 500
-
-
-def _raw_excerpt(text: str) -> str:
-    """A capped, redacted excerpt of a model reply, safe to put in a log.
-
-    Redacted BEFORE slicing: cutting first could split a PEM block across the
-    elision and leave each half unmatched by the redactor. ``core.logging``
-    only substitutes secrets explicitly registered with it, so the content
-    redactor has to run here or a key the model quoted back at us reaches the
-    log untouched.
-    """
-    clean = redact(text)
-    if len(clean) <= _RAW_HEAD_CHARS + _RAW_TAIL_CHARS:
-        return clean
-    elided = len(clean) - _RAW_HEAD_CHARS - _RAW_TAIL_CHARS
-    return f"{clean[:_RAW_HEAD_CHARS]}\n…[{elided} chars elided]…\n{clean[-_RAW_TAIL_CHARS:]}"
-
-
-# Shown only alongside a failure, because on its own a dropped schema explains
-# nothing — plenty of models parse fine without it. Next to "every call returned
-# prose" it is very likely the cause, and it is the one part of that story the
-# reader cannot see from the PR.
-_SCHEMA_DROP_NOTE = (
-    "The model refused the structured-output schema partway through this run, so "
-    "later calls asked for JSON in the prompt only. That is a likely cause of the "
-    "failures above. The provider log names which model and why."
-)
-
-# A summary-line segment beside the model, never a notice: unlike a dropped
-# schema it explains nothing that went wrong, it qualifies the result — the
-# `temperature: 0.0` default is what makes a review reproducible, and litellm's
-# `drop_params` takes it away without a word on routes that refuse sampling
-# params. As a notice it would cost the LGTM on every clean review of a common
-# setup (gpt-5.x with reasoning on); the provider log names the model and why.
-_TEMPERATURE_SEGMENT = "temperature not sent"
-
-
-def _response_digest(text: str) -> str:
-    """A short, content-free identifier for a model reply.
-
-    Two failures are only comparable if you can tell whether they are the same
-    failure, and the benchmark evidence behind this could not: it recorded that
-    a case failed in all three repeats without being able to say whether the
-    three replies were identical. A digest answers that across runs, machines
-    and log aggregators while carrying nothing of the reply — which may quote
-    the diff back, so it can never go in a default-level log.
-
-    Truncated because it is an identifier, not a checksum: 12 hex characters is
-    48 bits, far past any collision a review will produce, and short enough to
-    read off a log line.
-    """
-    return hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:12]
-
-
-def _unparseable_reason(exc: ParseError, lens_id: str, text: str, *, schema_mode: bool) -> str:
-    """Report a reply that could not be parsed, and return the reason to post.
-
-    "Unparseable" alone sends a maintainer nowhere — a model answering in prose
-    and one emitting broken JSON need different fixes — so the shape rides in
-    the returned reason, which is already carried to ``CallRecord.error``, the
-    ``--profile`` row and the PR notice. That covers all three without a new
-    field on any of them.
-
-    The body itself is model output and can echo the diff, so the default level
-    gets its size and its shape and nothing of its content. The body goes out
-    only at DEBUG, which is the opt-in this repo already has for exactly this;
-    a dedicated flag would be four files of plumbing to say what
-    ``LGTMAYBE_LOG_LEVEL`` already says.
-    """
-    reason = f"unparseable model output ({exc.shape})"
-    extra: dict[str, Any] = {
-        "lens": lens_id,
-        "shape": str(exc.shape),
-        "response_chars": len(text),
-        # Identity without content: is this the same reply the last run failed on?
-        "response_sha256": _response_digest(text),
-        # Was provider-native schema enforcement active? Without it, "the model
-        # ignored the schema" and "there was no schema" read identically in a
-        # log, and they call for opposite fixes.
-        "schema_mode": schema_mode,
-    }
-    if _log.isEnabledFor(logging.DEBUG) and text:
-        extra["response_head"] = _raw_excerpt(text)
-    _log.warning(reason, extra=extra)
-    return reason
-
-
-def _error_reason(exc: BaseException) -> str:
-    """A concise, single-line reason for a failed review call, safe to show inline.
-
-    Leads with the exception type (litellm names are informative — RateLimitError,
-    AuthenticationError, Timeout) and collapses the message to one line, capped so
-    a verbose provider error doesn't bloat the PR comment.
-    """
-    text = " ".join(str(exc).split())
-    reason = f"{type(exc).__name__}: {text}" if text else type(exc).__name__
-    return reason[:200]
-
-
-def _scanner_covers(cfg: ReviewConfig, tool: StaticAnalysisTool) -> bool:
-    """Whether *tool* will report its own findings on this run.
-
-    When one will, the lens stops being asked for what it covers. For
-    ``osv_scanner`` that is dependency advisories: a model's knowledge cutoff
-    cannot answer "does this version have a published advisory?", so asking
-    anyway only puts a confident guess beside an accurate answer. For
-    ``gitleaks`` it is committed secrets: redaction rewrites every secret it
-    matches to ``[REDACTED]`` before the diff is sent, so the model is largely
-    being asked to find what it has been prevented from seeing — while gitleaks
-    reads the unredacted head text and answers it exactly.
-    """
-    sa = cfg.static_analysis
-    return sa.enabled and tool in sa.tools and mode_for(tool, cfg) is ToolMode.finding
-
-
-_BOUNDARY_SCAN_WORKERS = 8
-
-
-def _definition_spans_by_path(
-    file_contents: dict[str, str],
-    file_patches: Sequence[tuple[str, str]],
-    cfg: ReviewConfig,
-) -> dict[str, list[tuple[int, int]]]:
-    """Enclosing definition spans per path, scanned concurrently.
-
-    Empty when ``function_context`` is off, and a path with no fetched head text
-    is absent — so a caller reads ``.get(path)`` and gets ``None``, exactly the
-    "no boundaries" value ``expand_hunks`` took before.
-    """
-    if not cfg.function_context:
-        return {}
-    paths = [path for path, _ in file_patches if file_contents.get(path)]
-    if not paths:
-        return {}
-    with ThreadPoolExecutor(max_workers=min(_BOUNDARY_SCAN_WORKERS, len(paths))) as pool:
-        spans = pool.map(lambda path: definition_spans(file_contents[path], path), paths)
-        return dict(zip(paths, spans, strict=True))
-
-
-# What a call carries besides the diff: the wrapper delimiters and their
-# preamble, the hint/hidden blocks when present, and the model's own message
-# scaffolding. Measured once here rather than guessed per call.
-_WRAPPER_OVERHEAD_TOKENS = 400
-
-
-def _prompt_overhead_tokens(lenses: Sequence[_Lens], cfg: ReviewConfig) -> int:
-    """Tokens every lens call spends on prompt rather than diff.
-
-    `max_input_tokens` is the budget for the REQUEST, but only the diff was
-    measured against it — so a batch packed to exactly fill the budget produced
-    a request over it by the preamble plus a lens block. The reserve covers the
-    widest lens, because each call carries exactly one and the batch has to fit
-    whichever it is.
-    """
-    preamble = count_tokens(
-        build_shared_preamble(cfg.language, cfg.mid_review_retrieval, project_context(cfg.project))
-    )
-    widest_lens = max((count_tokens(lens.user_block) for lens in lenses), default=0)
-    return preamble + widest_lens + _WRAPPER_OVERHEAD_TOKENS
-
-
-def _batch_budget(lenses: Sequence[_Lens], cfg: ReviewConfig) -> int:
-    """The diff budget per batch: the input budget less the prompt overhead.
-
-    The reserve is skipped when it would take half the budget or more. A
-    `max_input_tokens` that small cannot fit the prompt whatever we do, and
-    reserving anyway would shrink the diff share to nothing and split every file
-    into single hunks — making a misconfiguration worse rather than safer.
-    """
-    overhead = _prompt_overhead_tokens(lenses, cfg)
-    if overhead * 2 >= cfg.max_input_tokens:
-        return max(1, cfg.max_input_tokens)
-    return cfg.max_input_tokens - overhead
 
 
 def _is_droppable_scan(finding: ReviewFinding) -> bool:
@@ -3639,24 +1172,227 @@ def _passes_severity_floor(
     )
 
 
-def _unbatched_hint_carrier(lenses: Sequence[_Lens]) -> _Lens | None:
-    """The lens that carries hints no batch holds: security, else correctness."""
-    by_id = {lens.id: lens for lens in lenses}
-    return by_id.get(ReviewCategory.security.value) or by_id.get(ReviewCategory.correctness.value)
+def _new_run(
+    cfg: ReviewConfig,
+    ctx: PRContext,
+    provider: ProviderClient,
+    state: _RunState,
+    ceilings: tuple[float | None, int | None],
+    *,
+    can_fetch: bool,
+) -> _Run:
+    """The run every model call of this review shares; see :class:`_Run`.
+
+    *ceilings* are the lens fan-out's ``(deadline_at, budget_at)`` from
+    ``stages.lens_ceilings``; *can_fetch* is whether a read-only file reader
+    was injected for mid-review retrieval.
+    """
+    # Everything a model call needs that does not vary across the run, in one
+    # object: resolved here, then carried unchanged through the fan-out, the
+    # oversized-batch split, and a deferral's re-run.
+    deadline_at, budget_at = ceilings
+    return _Run(
+        model=cfg.model,
+        # Constrain output to the findings schema (provider-native JSON mode) per
+        # review call — NOT globally, so the reflection call keeps its own format.
+        response_format=ReviewResult if cfg.structured_output else None,
+        language=cfg.language,
+        project=project_context(cfg.project),
+        deadline_at=deadline_at,
+        budget_at=budget_at,
+        retrieval_budget=retrieval_budget(cfg, can_fetch=can_fetch),
+        concurrency=concurrency_cap(cfg),
+        cfg=cfg,
+        provider=provider,
+        state=state,
+        changed_files=tuple(ctx.changed_files),
+        stack_block=wrap_stack(_redacted_stack(ctx.stack)),
+    )
 
 
-_UNBATCHED_HINTS_LEAD = (
-    "The static-analysis hints below are about files the diff does not show: "
-    "dependency lockfiles and manifests, which are never reviewed line by line. "
-    "Confirm or discard each one like any other hint. Report a confirmed advisory "
-    "against the lockfile path the hint names (for example `uv.lock`), quoting the "
-    "affected package and version as the `anchor`."
-)
+def _summarise(
+    ctx: PRContext,
+    prepared: _PreparedReview,
+    filtered: list[ReviewFinding],
+    *,
+    errors: list[str],
+    failed_lenses: list[str],
+    total_calls: int,
+    failed_calls: int,
+    suppressed: int,
+    off_diff: int,
+    reflection_skipped: str | None,
+    reflection_trimmed: bool,
+    risk: RiskAssessment | None,
+) -> str:
+    """The summary for the *filtered* findings: the summary line, every notice, the markers."""
+    cfg = prepared.cfg
+    state = prepared.run.state
+    summary_line = _summary_line(
+        len(filtered),
+        cfg,
+        risk,
+        temperature_dropped=state.temperature_dropped,
+        stack=ctx.stack,
+    )
+    profiler.record_returned_findings(len(filtered))
+
+    notices = _build_notices(
+        _NoticeState(
+            cfg=cfg,
+            capped_files=prepared.capped_files,
+            total_files=prepared.total_files,
+            oversized=prepared.oversized,
+            skipped_by_triage=prepared.skipped_by_triage,
+            errors=errors,
+            total_calls=total_calls,
+            failed_calls=failed_calls,
+            failed_lenses=failed_lenses,
+            split_batches=len(state.split_batches),
+            stepped_down=sorted(state.stepped_down),
+            reasoning_off=sorted(state.reasoning_off),
+            escalated=dict(state.escalated),
+            repaired=sorted(state.repaired),
+            flooded=dict(state.flooded),
+            re_asked=sorted(state.re_asked),
+            schema_dropped=state.schema_dropped,
+            reflection_skipped=reflection_skipped,
+            suppressed=suppressed,
+            off_diff=off_diff,
+            open_finding_threads=ctx.open_finding_threads,
+            unbatched_hints_dropped=prepared.unbatched_hints_dropped,
+            self_talk=dict(state.self_talk),
+            spec_unfit=prepared.spec_unfit,
+            spec_reviewed=prepared.spec_reviewed,
+            reflection_trimmed=reflection_trimmed,
+        )
+    )
+    return _compose_summary(
+        notices,
+        summary_line,
+        clean=not filtered,
+        lenses=prepared.lenses,
+        failed_lenses=failed_lenses,
+        risk=risk,
+    )
 
 
-def _unbatched_hint_block(hints: Sequence[ToolFinding]) -> str:
-    """The trusted lead-in plus the redacted, wrapped hints for the carrier lens."""
-    return f"{_UNBATCHED_HINTS_LEAD}\n\n{wrap_hints(redact(format_hints(list(hints))))}"
+def _snap_to_diff(
+    findings: list[ReviewFinding],
+    ctx: PRContext,
+    prepared: _PreparedReview,
+    reviewed_diff: str,
+) -> tuple[list[ReviewFinding], set[str]]:
+    """Stage 6: re-anchor every finding, and unanchor the ones with no line to sit on.
+
+    Returns the findings and the scan-only paths a carried hint flagged, which
+    the severity floor in stage 9 exempts from its unanchored rule.
+    """
+    # 6. Re-anchor: the model hand-counts line numbers from the hunk header and
+    #    routinely drifts a few lines. Snap each finding's line to the real
+    #    changed line whose content matches its verbatim `anchor`, so comments
+    #    land on the code they describe. Done before dedupe so findings the
+    #    model placed on slightly different wrong lines collapse correctly.
+    #    Scan findings snap against `scan_scope` (the diff the corpus saw)
+    #    rather than the reviewed diff: their files can have left file_patches
+    #    at triage (3c) or the file cap (3d), and dropping them as off-diff
+    #    for that would blame unchanged lines that were never the problem.
+    scans_at_snap = [f for f in findings if _is_scan_finding(f)]
+    all_findings = _snap_findings(
+        [f for f in findings if not _is_scan_finding(f)], reviewed_diff
+    ) + _snap_findings(scans_at_snap, prepared.scan_scope)
+    # A finding on a scan-only file (a lockfile advisory the model
+    # confirmed from an unbatched hint) has no reviewed line to sit on:
+    # the file is never in the reviewed diff. Mark it unanchored, so
+    # every gateway demotes it to the review body rather than guessing
+    # a line. Only a file a carried hint flagged is exempt from the
+    # unanchored floor in step 9: a claim about a lockfile no scanner
+    # flagged is a guess like any other unanchored finding.
+    no_line_paths = set(ctx.scan_contents) - {path for path, _ in prepared.file_patches}
+    hinted_no_line_paths = (
+        {h.path for h in prepared.unbatched} & no_line_paths
+        if prepared.carrier is not None
+        else set()
+    )
+    all_findings = [
+        f.model_copy(update={"anchored": False}) if f.path in no_line_paths and f.anchored else f
+        for f in all_findings
+    ]
+    return all_findings, hinted_no_line_paths
+
+
+def _scope_scans(findings: list[ReviewFinding]) -> tuple[list[ReviewFinding], int]:
+    """Stage 6b: drop scan findings off the changed lines; returns how many went."""
+    # 6b. Scope scan findings to the change. The tools read whole files, so
+    #     they see pre-existing code the PR never touched; an anchor that
+    #     matched no changed line means exactly that. The model is already
+    #     told "only raise these when the diff itself shows the change" —
+    #     hold the tools to the same rule, or a fixture's fake credential
+    #     posts on every PR that happens to touch the file. Dependency
+    #     findings are exempt: see _UNANCHORABLE_SCAN_CATEGORIES.
+    scoped = [f for f in findings if f.anchored or not _is_droppable_scan(f)]
+    off_diff = len(findings) - len(scoped)
+    if off_diff:
+        _log.info("scan findings outside the diff dropped", extra={"count": off_diff})
+    return scoped, off_diff
+
+
+def _suppress(
+    findings: list[ReviewFinding], cfg: ReviewConfig, ctx: PRContext
+) -> tuple[list[ReviewFinding], int]:
+    """Stage 7: drop the findings a team marked known-fine; returns how many, per location."""
+    # 7. Suppression: drop findings a team has marked known-fine — by
+    #    fingerprint (cfg.ignore_fingerprints) or an inline `# lgtmaybe:
+    #    ignore` pragma on/above the flagged line. Done before reflection so a
+    #    suppressed finding costs no reflection tokens and never posts.
+    #
+    #    This and the evidence gate (7b) run BEFORE the merge (7c): dedupe
+    #    keeps one finding per location, so a copy these filters would drop
+    #    could otherwise win its location and take the line's real finding
+    #    down with it.
+    unsuppressed = apply_suppressions(findings, cfg, ctx.file_contents, ctx.feedback_downvotes)
+    # Counted per location, as the merge would collapse them, so several
+    # lenses' copies of one dismissed finding read as one suppression.
+    unsuppressed_ids = {id(f) for f in unsuppressed}
+    suppressed = len(_dedupe([f for f in findings if id(f) not in unsuppressed_ids]))
+    return unsuppressed, suppressed
+
+
+def _cap_scans(findings: list[ReviewFinding], off_diff: int) -> list[ReviewFinding]:
+    """Stage 7a: keep the most severe ``MAX_SCAN_FINDINGS`` scan findings."""
+    # 7a. Cap the scan findings after scoping (6b) and suppression (7): the
+    #     cap bounds posted comments, so findings those stages drop must not
+    #     spend its slots — the slot a suppressed hit vacates goes to the
+    #     next on-diff hit instead. Model findings never count against it.
+    scans = [f for f in findings if _is_scan_finding(f)]
+    if len(scans) <= MAX_SCAN_FINDINGS:
+        return findings
+    considered = len(scans) + off_diff  # pre-cap count, before reassignment
+    scans = sorted(scans, key=lambda f: f.severity.rank, reverse=True)[:MAX_SCAN_FINDINGS]
+    _log.info(
+        "scan findings capped after diff scoping",
+        extra={"kept": MAX_SCAN_FINDINGS, "considered": considered},
+    )
+    return [f for f in findings if not _is_scan_finding(f)] + scans
+
+
+def _apply_floors(
+    findings: list[ReviewFinding], cfg: ReviewConfig, hinted_no_line_paths: set[str]
+) -> list[ReviewFinding]:
+    """Stages 9 and 9b: the severity floors, then the team's finding rules."""
+    # 9. Filter: drop findings below the severity floor, and apply the
+    #    stricter unanchored floor — a finding the engine could not anchor is a
+    #    low-confidence guess, so surface it only when it's high/critical.
+    filtered = [
+        f for f in findings if _passes_severity_floor(f, cfg, no_line_paths=hinted_no_line_paths)
+    ]
+
+    # 9b. Declarative post-processing (finding_rules, default none): the
+    #     team's drop / severity-remap rules, applied last so they see
+    #     exactly what would otherwise post.
+    if cfg.finding_rules:
+        filtered = apply_finding_rules(filtered, cfg)
+    return filtered
 
 
 def _filter_missing_failure_scenarios(

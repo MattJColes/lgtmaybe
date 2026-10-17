@@ -1124,7 +1124,7 @@ def test_split_pieces_carry_their_own_blocks_not_the_batchs(
         severity=Severity.medium,
     )
     monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis",
+        "lgtmaybe.engine.stages.run_static_analysis",
         lambda files, cfg: [hint_one, hint_two],
     )
     cfg = ReviewConfig(

@@ -333,7 +333,7 @@ def test_a_finding_mode_scan_hit_escalates_past_triage(monkeypatch) -> None:  # 
         message="AWS Access Key",
         severity=Severity.high,
     )
-    monkeypatch.setattr("lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [hit])
+    monkeypatch.setattr("lgtmaybe.engine.stages.run_static_analysis", lambda files, cfg: [hit])
     base = _cfg(triage_model="tiny", reflect=False)
     sa = base.static_analysis.model_copy(
         update={"tool_mode": {StaticAnalysisTool.gitleaks: ToolMode.finding}}

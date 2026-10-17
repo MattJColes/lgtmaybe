@@ -2,7 +2,8 @@
 
 ## Purpose
 
-The engine (`engine/engine.py`) that turns a PR context into findings: a
+The engine (`engine/engine.py`, its preparation stages in
+`engine/stages.py`) that turns a PR context into findings: a
 composable pipeline — redact → split → cap → static-analysis → triage →
 expand → batch → fan-out per lens → parse → merge/dedupe → snap → reflect →
 filter — with budget behaviors that degrade loudly, never silently. The

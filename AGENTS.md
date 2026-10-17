@@ -165,7 +165,7 @@ host.** Host differences: `docs/explanation/architecture.md` and
 - **Provenance badge** (`core/comment.finding_badge`): `**[HIGH · security ·
   80%] Title**`. Visible prose only, **never part of the hidden ids**.
 - **Hidden summary markers:** watermark (`<!-- lgtmaybe-reviewed:<sha> -->`),
-  risk level, and `<!-- lgtmaybe-lenses:… -->` (`engine._lenses_marker`; a
+  risk level, and `<!-- lgtmaybe-lenses:… -->` (`notices._lenses_marker`; a
   failed lens is left out) so a gate can require the lens set it expects. A
   same-commit update edits in place; a review at a new commit posts a fresh
   summary, preserving history.
@@ -299,7 +299,7 @@ docstrings.
   previous handler as it fires and is a no-op off the main thread. `--profile`
   prints timings (`engine/profiling.py`).
 - **Custom lenses** (`extra_lenses`, `lens_paths`): built like built-in lenses
-  (`engine._build_lenses`). Trusted config only.
+  (`lenses._build_lenses`). Trusted config only.
 - **Intent lens:** intent is sent **only on the intent call**; none stated skips
   it.
 - **Spec lens** (`engine/specs.py`, default on, detection-gated; `--spec`):
@@ -363,14 +363,14 @@ docstrings.
   opt-out**. Keep the shared prefix (preamble, wrapped diff, hints)
   lens-independent and byte-identical; lens text goes in the final uncached
   block.
-- **Truncation ladder** (`engine._remedy_oversized`): two detectors (adapter
+- **Truncation ladder** (`recovery._Ladder._remedy_oversized`): two detectors (adapter
   `ProviderTruncated`, and the parser catching an unterminated body) feed one
   ladder; `ProviderInputTooLarge` takes the same split. **Do not re-split
   them:** which fires is a fact about the route, not the failure. The rung
   depends on the cause, on the user's model: `_review_split` when the
   **answer** outgrew the ceiling; `_retry_lower_effort` when the **thinking**
   did (one graded step down, then one call with reasoning off). **Escalation
-  is last:** only after those fail does `engine._escalate_model` re-run once on
+  is last:** only after those fail does `recovery._Ladder._escalate_model` re-run once on
   `fallback_model`, per batch never per split piece, because a new model
   re-sends the same request at the same ceiling.
   - Lens calls carry `defer_truncation`, so the adapter hands truncation back
@@ -379,7 +379,7 @@ docstrings.
   - The parse-path notice names no `max_tokens` ceiling, because nothing
     measured one.
   - `--fallback-model` / the Action input win over `ReviewConfig.fallback_model`.
-  - The answering model is disclosed (`engine._note_answering_model`).
+  - The answering model is disclosed (`recovery._Ladder._note_answering_model`).
   - **Do not route on diff size:** truncation does not track size, so a size
     threshold spends the strong model on diffs that were already fine.
 - **Self-talk** (`engine/selftalk.py`, `_stamp_and_bound`): a finding is
