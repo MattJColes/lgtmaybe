@@ -32,17 +32,17 @@ cli.diagram-sequence:
   rule:
     kind: function_definition
     has: { field: name, regex: '^_sequence_views$' }
-  files: [src/lgtmaybe/engine/**/*.py]
+  files: [src/lgtmaybe/features/**/*.py]
 
 cli.overview-high-impact:
   - rule:
       kind: function_definition
       has: { field: name, regex: '^build_overview$' }
-    files: [src/lgtmaybe/engine/overview.py]
+    files: [src/lgtmaybe/features/overview.py]
   - rule:
       kind: function_definition
       has: { field: name, regex: '^path_signals$' }
-    files: [src/lgtmaybe/engine/high_impact.py]
+    files: [src/lgtmaybe/engine/impact_areas.py]
 
 cli.existing-overview:
   - rule:

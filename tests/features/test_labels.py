@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 
 from lgtmaybe.core.models import PRContext, ReviewFinding, Severity
-from lgtmaybe.engine.labels import compute_labels
+from lgtmaybe.features.labels import compute_labels
 
 _SMALL_DIFF = "diff --git a/a.py b/a.py\n@@ -1 +1,2 @@\n old\n+new\n"
 
@@ -100,7 +100,7 @@ def test_a_leaked_secret_earns_the_security_label() -> None:
     The label predicate keyed on the literal "security" category, which no
     deterministic secret scanner ever carries.
     """
-    from lgtmaybe.engine.labels import SECURITY_LABEL, compute_labels
+    from lgtmaybe.features.labels import SECURITY_LABEL, compute_labels
 
     finding = ReviewFinding(
         path="src/app.py",

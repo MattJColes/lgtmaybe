@@ -725,7 +725,7 @@ class TestLocalEmptyDiff:
     @staticmethod
     def _forbid_model_calls(monkeypatch) -> list[str]:  # type: ignore[no-untyped-def]
         import lgtmaybe.cli as cli_module
-        import lgtmaybe.engine.overview as overview_module
+        import lgtmaybe.features.overview as overview_module
 
         called: list[str] = []
 

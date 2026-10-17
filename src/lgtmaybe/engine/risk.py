@@ -7,7 +7,7 @@ produced it. Four factors, all deterministic:
 - **blast radius**: how many workspace files import each changed file, found by
   one ast-grep scan (Python, TypeScript, JavaScript), plus the user's
   ``risk.core_paths`` globs for the hubs an import count can't see;
-- **High Impact path signals** (``high_impact.path_signals``), the same regexes
+- **High Impact path signals** (``impact_areas.path_signals``), the same regexes
   that floor the overview's High Impact Areas;
 - **change size**;
 - **code changed with no test file changed**.
@@ -44,6 +44,7 @@ from lgtmaybe.core.models import (
 )
 
 from .astgrep import _find_binary, iter_matches
+from .impact_areas import AREA_LABELS, path_signals
 from .static_analysis import scrubbed_env
 
 _log = get_logger(__name__)
@@ -281,9 +282,6 @@ def _area_reasons(files: Sequence[str]) -> list[RiskReason]:
     Test and doc files are left out: a test named for auth, or a runbook, says
     nothing about what the change can break.
     """
-    # Lazy: high_impact -> describe -> engine, and engine imports this module.
-    from .high_impact import AREA_LABELS, path_signals
-
     relevant = [f for f in files if not is_test_path(f) and not is_doc_path(f)]
     reasons = []
     for area, paths in path_signals(relevant).items():

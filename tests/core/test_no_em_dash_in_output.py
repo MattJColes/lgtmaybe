@@ -31,12 +31,12 @@ from lgtmaybe.core.models import (
     ReviewFinding,
     Severity,
 )
-from lgtmaybe.engine.diagram import render_diagram_views
-from lgtmaybe.engine.high_impact import render_high_impact
 from lgtmaybe.engine.notices import _SCHEMA_DROP_NOTE, _build_notices, _NoticeState
 from lgtmaybe.engine.parse import ParseError, parse_findings
 from lgtmaybe.engine.run import _BUDGET_SKIP_REASON, _INTERRUPT_SKIP_REASON
 from lgtmaybe.engine.static_analysis import ToolFinding, tool_review_findings
+from lgtmaybe.features.diagram import render_diagram_views
+from lgtmaybe.features.high_impact import render_high_impact
 
 _DASHES = ("—", "–")
 _SRC = Path(__file__).resolve().parents[2] / "src" / "lgtmaybe"
@@ -201,14 +201,15 @@ _OUTPUT_MODULES = (
     "cli/render.py",
     "core/comment.py",
     "engine/engine.py",
-    "engine/labels.py",
+    "engine/impact_areas.py",
     "engine/lenses.py",
     "engine/notices.py",
-    "engine/overview.py",
     "engine/recovery.py",
     "engine/risk.py",
     "engine/run.py",
     "engine/stages.py",
+    "features/labels.py",
+    "features/overview.py",
     "gitea/gateway.py",
     "github/rest_gateway.py",
     "gitlab/gateway.py",

@@ -1066,9 +1066,9 @@ def test_findings_are_written_for_any_engineer() -> None:
 @pytest.mark.parametrize(
     ("module", "constant"),
     [
-        ("lgtmaybe.engine.describe", "_DESCRIBE_SYSTEM"),
-        ("lgtmaybe.engine.high_impact", "_HIGH_IMPACT_SYSTEM"),
-        ("lgtmaybe.engine.diagram", "_DIAGRAM_SYSTEM"),
+        ("lgtmaybe.features.describe", "_DESCRIBE_SYSTEM"),
+        ("lgtmaybe.features.high_impact", "_HIGH_IMPACT_SYSTEM"),
+        ("lgtmaybe.features.diagram", "_DIAGRAM_SYSTEM"),
     ],
 )
 def test_the_overview_prompts_share_the_plain_language_rule(module: str, constant: str) -> None:

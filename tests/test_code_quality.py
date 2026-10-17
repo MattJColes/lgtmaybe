@@ -8,7 +8,9 @@ objectively outdated, never on opinion:
 - the deprecation gate in pyproject must stay wired, so nobody can silently
   drop it;
 - no module imports a private (``_name``) symbol from a different top-level
-  subpackage of lgtmaybe, so a package's private helpers stay its own.
+  subpackage of lgtmaybe, so a package's private helpers stay its own;
+- no review-pipeline module (``lgtmaybe.engine``) imports the sibling features
+  (``lgtmaybe.features``), so imports between the two go one way.
 
 Newer-version availability and CVE scanning are intentionally *not* here — they
 depend on the outside world at time-of-check and so can't be deterministic. They
@@ -232,15 +234,14 @@ def _is_private(name: str) -> bool:
     return name.startswith("_") and not (name.startswith("__") and name.endswith("__"))
 
 
-def _cross_package_private_imports(root: Path = _SRC_PACKAGE) -> list[tuple[str, str, str]]:
-    """Every import of a ``_name`` (or a ``_module`` on the path) that crosses a subpackage.
+def _module_imports(root: Path = _SRC_PACKAGE) -> list[tuple[str, str, list[str]]]:
+    """Every lgtmaybe import in the tree under *root*, as (importer, source, names).
 
-    Covers ``from lgtmaybe.<pkg>... import _name``, a private module on either
-    import form's path (``import lgtmaybe.<pkg>._mod``, or a root-level
-    ``import lgtmaybe._mod``), and the package root
-    (``from lgtmaybe import _name``, whose subpackage is ``""``).
+    Walks the whole module, so a function-local import counts. A relative import
+    is resolved against the importing module's package, and ``import a.b`` is
+    reported with no names.
     """
-    found: list[tuple[str, str, str]] = []
+    found: list[tuple[str, str, list[str]]] = []
     for path in sorted(root.rglob("*.py")):
         relative = path.relative_to(root.parent).with_suffix("")
         parts = list(relative.parts)
@@ -263,14 +264,29 @@ def _cross_package_private_imports(root: Path = _SRC_PACKAGE) -> list[tuple[str,
                 else:
                     source = node.module or ""
                 imports = [(source, [alias.name for alias in node.names])]
-            for source, names in imports:
-                if source != "lgtmaybe" and not source.startswith("lgtmaybe."):
-                    continue
-                if _top_level_subpackage(source) == _top_level_subpackage(importer):
-                    continue
-                if any(_is_private(part) for part in source.split(".")[1:]):
-                    found.append((importer, source, ""))
-                found.extend((importer, source, name) for name in names if _is_private(name))
+            found.extend(
+                (importer, source, names)
+                for source, names in imports
+                if source == "lgtmaybe" or source.startswith("lgtmaybe.")
+            )
+    return found
+
+
+def _cross_package_private_imports(root: Path = _SRC_PACKAGE) -> list[tuple[str, str, str]]:
+    """Every import of a ``_name`` (or a ``_module`` on the path) that crosses a subpackage.
+
+    Covers ``from lgtmaybe.<pkg>... import _name``, a private module on either
+    import form's path (``import lgtmaybe.<pkg>._mod``, or a root-level
+    ``import lgtmaybe._mod``), and the package root
+    (``from lgtmaybe import _name``, whose subpackage is ``""``).
+    """
+    found: list[tuple[str, str, str]] = []
+    for importer, source, names in _module_imports(root):
+        if _top_level_subpackage(source) == _top_level_subpackage(importer):
+            continue
+        if any(_is_private(part) for part in source.split(".")[1:]):
+            found.append((importer, source, ""))
+        found.extend((importer, source, name) for name in names if _is_private(name))
     return found
 
 
@@ -323,3 +339,64 @@ def test_cross_package_private_import_scan_covers_every_import_form(tmp_path: Pa
         ("lgtmaybe.engine.a", "lgtmaybe.core.x", "_relative"),
         ("lgtmaybe.core.b", "lgtmaybe.engine._mod", ""),
     }
+
+
+#: The sibling features: each makes its own model call or posts its own
+#: comment, and the review pipeline needs none of them.
+_FEATURE_MODULES = ("describe", "diagram", "high_impact", "labels", "overview", "validate")
+
+
+def _engine_imports_of_features(root: Path = _SRC_PACKAGE) -> list[tuple[str, str]]:
+    """Every import in ``lgtmaybe.engine`` that reaches into ``lgtmaybe.features``."""
+    found: list[tuple[str, str]] = []
+    for importer, source, names in _module_imports(root):
+        if _top_level_subpackage(importer) != "engine":
+            continue
+        if _top_level_subpackage(source) == "features":
+            found.append((importer, source))
+        elif source == "lgtmaybe" and "features" in names:
+            found.append((importer, "lgtmaybe.features"))
+    return found
+
+
+def test_review_pipeline_never_imports_the_features_package() -> None:
+    """Imports go one way: features may use the engine, the engine never uses features."""
+    offenders = _engine_imports_of_features()
+    assert not offenders, "engine modules import the features package: " + ", ".join(
+        f"{importer} imports {source}" for importer, source in offenders
+    )
+
+
+def test_engine_to_features_scan_covers_every_import_form(tmp_path: Path) -> None:
+    """Absolute, relative, package-root and function-local forms are all reported."""
+    root = tmp_path / "lgtmaybe"
+    sources = {
+        "engine/a.py": (
+            "from lgtmaybe.features.describe import build_description\n"
+            "import lgtmaybe.features.overview\n"
+            "from ..features import labels\n"
+            "from lgtmaybe import features\n"
+            "def late():\n"
+            "    from lgtmaybe.features.diagram import build_diagram\n"
+        ),
+        "engine/b.py": "from lgtmaybe.core.models import PRContext\nfrom . import risk\n",
+        "features/c.py": "from lgtmaybe.engine.risk import assess_risk\n",
+    }
+    for relative, text in sources.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    assert set(_engine_imports_of_features(root)) == {
+        ("lgtmaybe.engine.a", "lgtmaybe.features.describe"),
+        ("lgtmaybe.engine.a", "lgtmaybe.features.overview"),
+        ("lgtmaybe.engine.a", "lgtmaybe.features"),
+        ("lgtmaybe.engine.a", "lgtmaybe.features.diagram"),
+    }
+
+
+@pytest.mark.parametrize("name", _FEATURE_MODULES)
+def test_sibling_features_live_in_the_features_package(name: str) -> None:
+    """Each sibling feature sits in ``lgtmaybe.features``, not beside the pipeline."""
+    assert (_SRC_PACKAGE / "features" / f"{name}.py").is_file()
+    assert not (_SRC_PACKAGE / "engine" / f"{name}.py").exists()

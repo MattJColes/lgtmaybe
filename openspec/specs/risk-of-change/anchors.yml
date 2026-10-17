@@ -48,4 +48,4 @@ risk.overview:
   - rule:
       kind: function_definition
       has: { field: name, regex: '^_risk_section$' }
-    files: [src/lgtmaybe/engine/**/*.py]
+    files: [src/lgtmaybe/features/**/*.py]

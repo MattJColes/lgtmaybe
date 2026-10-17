@@ -220,7 +220,7 @@ def run_review(
         if cfg.pr_labels and isinstance(github, SupportsLabels):
             # Effort/risk labels from data already computed — best-effort,
             # and only on gateways that support them (fakes don't).
-            from lgtmaybe.engine.labels import compute_labels
+            from lgtmaybe.features.labels import compute_labels
 
             github.apply_pr_labels(compute_labels(findings, ctx))
         if cfg.fail_on is not None and isinstance(github, SupportsChecks):
@@ -360,7 +360,7 @@ def _validate_prior_findings(
         return "", frozenset()
 
     from lgtmaybe.core.models import FindingValidation, FindingValidationStatus
-    from lgtmaybe.engine.validate import validate_findings
+    from lgtmaybe.features.validate import validate_findings
 
     current_keys = current_finding_keys(current_findings)
     reproduced = [
@@ -449,7 +449,7 @@ def run_describe(
     gateway's upsert method; falls back to a plain issue comment. A prefetched
     ``ctx`` avoids repeating the expensive PR-context fetch.
     """
-    from lgtmaybe.engine.describe import build_description
+    from lgtmaybe.features.describe import build_description
 
     body = build_description(github.get_pr_context() if ctx is None else ctx, cfg, provider)
     if isinstance(github, SupportsDescribe):
@@ -472,7 +472,7 @@ def run_diagram(
     diagrams — each gated by its own config flag, all in one upsert under the
     diagram marker family.
     """
-    from lgtmaybe.engine.overview import build_overview
+    from lgtmaybe.features.overview import build_overview
 
     body = build_overview(github.get_pr_context() if ctx is None else ctx, cfg, provider)
     if isinstance(github, SupportsDiagram):

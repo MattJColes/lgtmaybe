@@ -406,24 +406,25 @@ docstrings.
   carries that caveat; any other failure is "risk unavailable" with
   no marker. **Never approval state.** Detail:
   `docs/explanation/risk-of-change.md`.
-- **Labels** (`engine/labels.py`, `pr_labels`, default off): touch only
+- **Labels** (`features/labels.py`, `pr_labels`, default off): touch only
   lgtmaybe's own label families.
 
-**Comments beyond the review**
+**Comments beyond the review** (`features/`: the pipeline needs none of it, so
+no `engine/` module imports it; `tests/test_code_quality.py` holds that line)
 
 - **Slash commands** (`comment`): `/review`, `/improve`, `/ask`
   (replies via `post_issue_comment`), `/describe`
-  (`engine/describe.py`, upsert), `/diagram`.
-- **Change overview** (`engine/overview.py`, `auto_diagram` default on): one
+  (`features/describe.py`, upsert), `/diagram`.
+- **Change overview** (`features/overview.py`, `auto_diagram` default on): one
   upserted comment with its own marker family. Description (`auto_describe`,
-  default on) and High Impact Areas (`engine/high_impact.py`, `high_impact`,
+  default on) and High Impact Areas (`features/high_impact.py`, `high_impact`,
   default on) are best-effort: a failure shows a visible "unavailable" line,
-  never a silent gap. The diagram call (`engine/diagram.py`) propagates failure:
-  it is a required completion step and must not stamp the head complete.
-  `auto_diagram` is the one switch for the whole comment. Path signals are
-  untrusted hints and a floor; High Impact drops model-chosen paths not in
-  `changed_files`. `describe.structured_call` is the
-  shared one-call scaffold; `describe.markdown_text` escapes every section's
+  never a silent gap. The diagram call (`features/diagram.py`) propagates
+  failure: it is a required completion step and must not stamp the head
+  complete. `auto_diagram` is the one switch for the whole comment. Path
+  signals (`engine/impact_areas.py`, shared with risk) are untrusted hints and a
+  floor; High Impact drops model-chosen paths not in `changed_files`.
+  `describe.structured_call` is the shared one-call scaffold; `describe.markdown_text` escapes every section's
   model prose. Model-authored Mermaid never reaches a fence; sequence labels are
   escaped with Mermaid entity codes. **No D2:** GitHub does not render it.
   `should_auto_diagram` gates the automatic overview to

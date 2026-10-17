@@ -24,13 +24,12 @@ from lgtmaybe.core.comment import code_span, strip_markers
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import DescribeResult, PRContext, ReviewConfig
 from lgtmaybe.core.ports import ProviderClient
-
-from .compress import count_tokens, take_lines
-from .injection import DIFF_END, DIFF_START, neutralise, wrap_intent
-from .parse import parse_structured
-from .prompt import PLAIN_LANGUAGE, language_directive
-from .redact import redact
-from .stages import _intent_text  # same package; the one canonical intent extractor
+from lgtmaybe.engine.compress import count_tokens, take_lines
+from lgtmaybe.engine.injection import DIFF_END, DIFF_START, neutralise, wrap_intent
+from lgtmaybe.engine.parse import parse_structured
+from lgtmaybe.engine.prompt import PLAIN_LANGUAGE, language_directive
+from lgtmaybe.engine.redact import redact
+from lgtmaybe.engine.stages import stated_intent  # the one canonical intent extractor
 
 _M = TypeVar("_M", bound=BaseModel)
 
@@ -165,7 +164,7 @@ def structured_call(
     object itself to lay several sections out in one comment, while describe
     and diagram render their own Markdown from what it parsed.
     """
-    intent = _intent_text(ctx)
+    intent = stated_intent(ctx)
     parts: list[str] = []
     if intent:
         parts.append(wrap_intent(redact(intent)))
