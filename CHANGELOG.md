@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.15.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.14.0...lgtmaybe-v2.15.0) (2026-10-17)
+
+
+### Features
+
+* **gitea:** resolve fixed findings' comments on Gitea 1.26+ ([#826](https://github.com/MattJColes/lgtmaybe/issues/826)) ([b1c55a0](https://github.com/MattJColes/lgtmaybe/commit/b1c55a0fa0880e01998e71fe8ec2f4b3efba89bc))
+* **provider:** review with a ChatGPT subscription ([#827](https://github.com/MattJColes/lgtmaybe/issues/827)) ([15e830c](https://github.com/MattJColes/lgtmaybe/commit/15e830c347075b04efebe28764a5f9dd54cb766e))
+
+
+### Bug Fixes
+
+* **forgejo:** read FORGEJO_ event names and stop own comments cancelling commands ([#841](https://github.com/MattJColes/lgtmaybe/issues/841)) ([7fea9b5](https://github.com/MattJColes/lgtmaybe/commit/7fea9b51d5200897afc8d123402031ed06cf431a))
+* **gitea:** key resolved-comment dedupe on the comment's own author ([#828](https://github.com/MattJColes/lgtmaybe/issues/828)) ([2bb074b](https://github.com/MattJColes/lgtmaybe/commit/2bb074b2505fc74d46bcddac43ec141a99bebd5d))
+* land the rest of the merged stack and the second review pass ([#820](https://github.com/MattJColes/lgtmaybe/issues/820)) ([5967587](https://github.com/MattJColes/lgtmaybe/commit/5967587674ebd3ecceab34afeb0c691b479a2551))
+
+
+### Documentation
+
+* fold stacked pull requests into the GitHub Action guide ([#829](https://github.com/MattJColes/lgtmaybe/issues/829)) ([ccac651](https://github.com/MattJColes/lgtmaybe/commit/ccac6516050b4c4ae6810566035eca92b4d174e3))
+* move long design history from the largest modules into docs ([#854](https://github.com/MattJColes/lgtmaybe/issues/854)) ([39b51ae](https://github.com/MattJColes/lgtmaybe/commit/39b51aec0bbc7aa76cf3fb8ba005602e29e0bc73)), closes [#840](https://github.com/MattJColes/lgtmaybe/issues/840)
+* turn the ollama guide into a run-locally guide for ollama, llama.cpp and vLLM ([#843](https://github.com/MattJColes/lgtmaybe/issues/843)) ([4709365](https://github.com/MattJColes/lgtmaybe/commit/4709365419dc5e3ae229663932dfbc162295747b))
+
 ## [2.14.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.13.0...lgtmaybe-v2.14.0) (2026-10-16)
 
 
