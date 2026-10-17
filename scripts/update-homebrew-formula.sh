@@ -31,16 +31,26 @@ VERSION="${VERSION#v}"
 # source); the install step pulls the dependency tree as wheels. The release
 # workflow can fire before PyPI's trusted-publishing job has finished, so poll
 # until the version is available rather than racing it.
+#
+# The JSON API is not what pip reads: the formula's `pip install` resolves from
+# the /simple/ index, which can lag the JSON API after an upload (2.15.1 failed
+# exactly that way). So wait until the simple index lists the sdist as well,
+# asking for a revalidated page the way pip does.
 pypi_json=""
 for attempt in $(seq 1 60); do
-  if pypi_json="$(curl -fsSL "https://pypi.org/pypi/lgtmaybe/${VERSION}/json" 2>/dev/null)"; then
+  # Captured, not piped into `grep -q`: under pipefail, grep exiting on the
+  # first match can SIGPIPE curl and fail the check it just passed.
+  if json="$(curl -fsSL "https://pypi.org/pypi/lgtmaybe/${VERSION}/json" 2>/dev/null)" \
+    && simple="$(curl -fsSL -H "Cache-Control: max-age=0" "https://pypi.org/simple/lgtmaybe/" 2>/dev/null)" \
+    && grep -qF "lgtmaybe-${VERSION}.tar.gz" <<<"$simple"; then
+    pypi_json="$json"
     break
   fi
-  echo "lgtmaybe ${VERSION} not on PyPI yet (attempt ${attempt}); waiting 10s…" >&2
+  echo "lgtmaybe ${VERSION} not on PyPI's JSON API and simple index yet (attempt ${attempt}); waiting 10s…" >&2
   sleep 10
 done
 if [ -z "$pypi_json" ]; then
-  echo "error: lgtmaybe ${VERSION} never appeared on PyPI" >&2
+  echo "error: lgtmaybe ${VERSION} never appeared on both PyPI's JSON API and simple index" >&2
   exit 1
 fi
 

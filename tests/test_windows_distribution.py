@@ -122,3 +122,29 @@ def test_release_please_sequences_pypi_before_homebrew() -> None:
     # And a failed publish must skip the gate rather than push an uninstallable
     # formula: no `always()` in the job's condition.
     assert "always()" not in jobs["homebrew"]["if"]
+
+
+def test_winget_waits_for_the_token_rate_limit_before_submitting() -> None:
+    """wingetcreate's first call spends WINGET_TOKEN's hourly REST quota.
+
+    The 2.15.1 release failed with "GitHub API rate limit exceeded" on that
+    call: the token owner's quota was spent. Reading /rate_limit costs nothing,
+    so the job checks it with the same token and waits for the reset rather
+    than failing the release.
+    """
+    _text, workflow = read_workflow("winget.yml")
+    job = workflow["jobs"]["publish"]
+    names = [step["name"] for step in job["steps"]]
+    steps = {step["name"]: step for step in job["steps"]}
+    wait = steps["Wait for WINGET_TOKEN's rate limit"]
+
+    assert names.index("Wait for WINGET_TOKEN's rate limit") < names.index("Submit winget update")
+    assert wait["if"] == "steps.package.outputs.exists == 'true'"
+    # The quota that runs out is the PAT owner's, not the job's GITHUB_TOKEN.
+    assert wait["env"]["GH_TOKEN"] == "${{ secrets.WINGET_TOKEN }}"
+    assert "gh api rate_limit" in wait["run"]
+    assert "resources.core" in wait["run"]
+    assert "Start-Sleep" in wait["run"]
+    # A failed read must fail loudly, not fall through to a doomed submission.
+    assert "$LASTEXITCODE" in wait["run"]
+    assert "throw" in wait["run"]

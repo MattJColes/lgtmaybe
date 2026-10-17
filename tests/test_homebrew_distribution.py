@@ -111,3 +111,22 @@ def test_releasing_guide_names_the_tap_repo_to_create() -> None:
     # The guide may name the old slug to explain why the repo isn't called that,
     # but it must never point at it.
     assert "MattJColes/homebrew-lgtmaybe" not in guide
+
+
+def test_formula_generator_waits_for_the_simple_index() -> None:
+    """pip resolves from PyPI's /simple/ index, not the JSON API.
+
+    The 2.15.1 release failed because the JSON API already listed the version
+    while the simple index still served the old file list, so the install gate's
+    `pip install lgtmaybe==2.15.1` found no such version. The generator must not
+    hand off until the index pip reads lists the release too.
+    """
+    script = (_ROOT / "scripts" / "update-homebrew-formula.sh").read_text(encoding="utf-8")
+
+    assert "https://pypi.org/simple/lgtmaybe/" in script
+    # pip asks for a revalidated page; poll the same way, or a cached page can
+    # read as ready (or stale) differently from what pip then gets.
+    assert "Cache-Control: max-age=0" in script
+    assert "lgtmaybe-${VERSION}.tar.gz" in script
+    # The wait happens before the formula is written, inside the polling loop.
+    assert script.index("pypi.org/simple/lgtmaybe/") < script.index('cat > "$OUT"')
