@@ -40,7 +40,7 @@ from lgtmaybe.cli import (
 )
 from lgtmaybe.config import detect, store
 from lgtmaybe.config.loader import LOCAL_SETUP_HINT, ProviderNotConfigured, load_config
-from lgtmaybe.core.models import Provider, ReviewConfig, ReviewPreset, Severity
+from lgtmaybe.core.models import Provider, RequestConfig, ReviewConfig, ReviewPreset, Severity
 from lgtmaybe.core.ports import ProviderTruncated
 from lgtmaybe.providers import federation
 from lgtmaybe.providers.factory import DEFAULT_OLLAMA_BASE
@@ -1019,7 +1019,12 @@ def _verify_setup(provider: Provider, model: str, api_base: str | None) -> None:
     """One tiny completion through the review's own credential + provider path,
     so a bad key or model fails now, with the same "how to auth" message."""
     click.echo(f"Checking {provider.value} / {model} with one short request...")
-    cfg = ReviewConfig(provider=provider, model=model, api_base=api_base, timeout=_VERIFY_TIMEOUT)
+    cfg = ReviewConfig(
+        provider=provider,
+        model=model,
+        api_base=api_base,
+        request=RequestConfig(timeout=_VERIFY_TIMEOUT),
+    )
     # The review's structured INFO logs would interleave with the prompts.
     logging.disable(logging.INFO)
     try:

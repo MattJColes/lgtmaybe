@@ -283,9 +283,9 @@ def _bounded_default(cfg: ReviewConfig, concurrency: int) -> int:
     never drag a call below the provider default it would have had at width one.
     """
     scaled = default_timeout_for(cfg.provider, concurrency=concurrency)
-    if not cfg.max_review_seconds:
+    if not cfg.limits.max_review_seconds:
         return scaled
-    return max(default_timeout_for(cfg.provider), min(scaled, cfg.max_review_seconds))
+    return max(default_timeout_for(cfg.provider), min(scaled, cfg.limits.max_review_seconds))
 
 
 def build_provider_engine(
@@ -320,20 +320,20 @@ def build_provider_engine(
     # num_ctx is ollama's context window — hosted providers manage theirs
     # server-side and litellm rejects the option, so only forward it for ollama.
     extra: dict[str, Any] = {}
-    if cfg.provider is Provider.ollama and cfg.num_ctx is not None:
-        extra["num_ctx"] = cfg.num_ctx
+    if cfg.provider is Provider.ollama and cfg.request.num_ctx is not None:
+        extra["num_ctx"] = cfg.request.num_ctx
     # The output cap. Forwarded verbatim — including the 0 that means "uncapped"
     # — because the factory is what interprets it: unset resolves to a
     # provider-aware default there (a finite ceiling for ollama, none for the
     # hosted routes), exactly as the timeout does. Not gated on the provider;
     # every route honours it, since litellm normalises the param.
-    if cfg.max_tokens is not None:
-        extra["max_tokens"] = cfg.max_tokens
+    if cfg.request.max_tokens is not None:
+        extra["max_tokens"] = cfg.request.max_tokens
     # Reasoning budget, sent only when asked for. litellm normalises the param
     # across the routes that support one, and a route without a reasoning
     # channel never sees it — so, like max_tokens, this is not gated on provider.
-    if cfg.reasoning_effort is not None:
-        extra["reasoning_effort"] = cfg.reasoning_effort
+    if cfg.request.reasoning_effort is not None:
+        extra["reasoning_effort"] = cfg.request.reasoning_effort
     # Announce the per-call budget AND where it came from, before any call runs.
     # A timeout failure reports the budget it blew ("provider request exceeded
     # 60s") but never its origin, so an explicit `timeout: 60` in a repo's
@@ -360,23 +360,27 @@ def build_provider_engine(
     # the state that puts a run back on the timeout for its only stop.
     concurrency = concurrency_cap(cfg)
     effective_timeout = (
-        cfg.timeout if cfg.timeout is not None else _bounded_default(cfg, concurrency)
+        cfg.request.timeout
+        if cfg.request.timeout is not None
+        else _bounded_default(cfg, concurrency)
     )
-    ceiling = resolve_max_tokens(cfg.provider, cfg.max_tokens)
+    ceiling = resolve_max_tokens(cfg.provider, cfg.request.max_tokens)
     _log.info(
         "per-call budget resolved",
         extra={
             "lgtmaybe_version": package_version(),
             "provider": cfg.provider.value,
             "timeout_s": effective_timeout,
-            "timeout_source": "configured" if cfg.timeout is not None else "provider default",
+            "timeout_source": "configured"
+            if cfg.request.timeout is not None
+            else "provider default",
             "concurrency": concurrency,
             "max_tokens": ceiling,
             "max_tokens_source": (
                 "uncapped"
                 if ceiling is None
                 else "configured"
-                if cfg.max_tokens
+                if cfg.request.max_tokens
                 else "provider default"
             ),
         },
@@ -390,11 +394,11 @@ def build_provider_engine(
         # Same precedence as `api_base` above: the invocation (CLI flag / Action
         # input) overrides what the repo's config asked for.
         fallback_model=runtime.fallback_model or cfg.fallback_model,
-        # The resolved value, not cfg.timeout — the widening and its bound are
+        # The resolved value, not cfg.request.timeout — the widening and its bound are
         # decided above, and passing the raw setting would have the factory
         # resolve a second, unbounded number that the log above then misreports.
         timeout=effective_timeout,
-        temperature=cfg.temperature,
+        temperature=cfg.request.temperature,
         **extra,
     )
     engine = LLMReviewEngine(provider, fetch_file=fetch_file, resolve_symbol=resolve_symbol)
@@ -971,8 +975,10 @@ _ACTION_CONFIG_EXCLUSIONS = frozenset(
         "unanchored_min_severity",
     }
 )
+#: Derived from the flat key set, so a grouped setting stays its own input
+#: (`max_review_seconds`, not `limits`).
 _ACTION_INPUTS = tuple(
-    sorted(set(ReviewConfig.model_fields) - _ACTION_CONFIG_EXCLUSIONS | _RUNTIME_INPUTS)
+    sorted(set(ReviewConfig.flat_fields()) - _ACTION_CONFIG_EXCLUSIONS | _RUNTIME_INPUTS)
 )
 
 

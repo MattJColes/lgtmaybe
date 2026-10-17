@@ -111,7 +111,7 @@ __all__ = [
 _log = get_logger(__name__)
 
 
-# Auto concurrency (cfg.max_concurrency=None) — one number, every provider:
+# Auto concurrency (cfg.limits.max_concurrency=None) — one number, every provider:
 #
 # - Six everywhere. An extra worker can cut a full-latency wave off the
 #   wall clock (only when it changes how many waves there are — wall time is
@@ -193,8 +193,8 @@ def concurrency_cap(cfg: ReviewConfig) -> int:
     fan-out's: a one-lens review sizes its pool to one task, but that says
     nothing about what the provider will serve at once.
     """
-    if cfg.max_concurrency is not None:
-        return max(1, cfg.max_concurrency)
+    if cfg.limits.max_concurrency is not None:
+        return max(1, cfg.limits.max_concurrency)
     return _DEFAULT_MAX_WORKERS
 
 
@@ -371,7 +371,9 @@ class LLMReviewEngine:
         provider with no method, or no opinion, changes nothing. Only ever
         down, never up: the default is also a spend ceiling.
         """
-        if "max_input_tokens" in cfg.model_fields_set:
+        # The group's own fields_set: setting a sibling (`context_lines`) marks
+        # the group set, never this field, so a defaulted budget is still fitted.
+        if "max_input_tokens" in cfg.batching.model_fields_set:
             return cfg
         recovery = self._recovery()
         if recovery is None:
@@ -383,13 +385,14 @@ class LLMReviewEngine:
             return cfg
         if not isinstance(budget, int) or isinstance(budget, bool) or budget <= 0:
             return cfg
-        if budget >= cfg.max_input_tokens:
+        if budget >= cfg.batching.max_input_tokens:
             return cfg
         _log.info(
             "max_input_tokens fitted to the model's context window",
-            extra={"default": cfg.max_input_tokens, "fitted": budget},
+            extra={"default": cfg.batching.max_input_tokens, "fitted": budget},
         )
-        return cfg.model_copy(update={"max_input_tokens": budget})
+        batching = cfg.batching.model_copy(update={"max_input_tokens": budget})
+        return cfg.model_copy(update={"batching": batching})
 
     def review(self, ctx: PRContext, cfg: ReviewConfig) -> tuple[list[ReviewFinding], str]:
         """Run the review pipeline and return (findings, summary)."""

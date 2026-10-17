@@ -71,8 +71,11 @@ def _validate_key(key: str) -> None:
             "API keys are read from the environment, not stored in config. "
             "Set the provider's env var (e.g. OPENAI_API_KEY) or pass --api-key."
         )
-    if key not in ReviewConfig.model_fields:
-        valid = ", ".join(sorted(ReviewConfig.model_fields))
+    # The flat key set: a grouped setting (`max_input_tokens`) is stored under
+    # its own name, which ReviewConfig lifts into its group on load.
+    fields = ReviewConfig.flat_fields()
+    if key not in fields:
+        valid = ", ".join(sorted(fields))
         raise ValueError(f"unknown config key {key!r}; valid keys: {valid}")
 
 
@@ -80,6 +83,6 @@ def _coerce(key: str, value: str) -> Any:
     """Coerce a string value to the field's type, storing enums as plain values."""
     # FieldInfo.annotation is typed Optional, but every ReviewConfig field is
     # annotated (``_validate_key`` has already confirmed the key exists).
-    annotation: Any = ReviewConfig.model_fields[key].annotation
+    annotation: Any = ReviewConfig.flat_fields()[key].annotation
     coerced: Any = TypeAdapter(annotation).validate_strings(value)
     return coerced.value if isinstance(coerced, Enum) else coerced

@@ -7,11 +7,13 @@ in the foundation step: change them only by consensus, never to suit one track.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from contextlib import suppress
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic.fields import FieldInfo
 
 # Side of the diff a comment attaches to, matching the GitHub review API.
 Side = Literal["LEFT", "RIGHT"]
@@ -540,147 +542,6 @@ class DirectoryRule(_Strict):
     context_files: list[str] = Field(default_factory=list)
 
 
-class FileWalkthrough(_Strict):
-    """One entry of a PR description's per-file walkthrough."""
-
-    path: str
-    summary: str = ""
-
-
-class DescribeResult(_Strict):
-    """Structured-output envelope for the describe pass.
-
-    A fixed-shape object so it can be enforced as a JSON schema via litellm
-    ``response_format``. Every field beyond the title is optional with an
-    empty default, so a model that answers partially still validates; a fully
-    unparseable answer falls back to the raw text.
-    """
-
-    title: str
-    change_type: str = ""
-    summary: str = ""
-    walkthrough: list[FileWalkthrough] = Field(default_factory=list)
-    intent_check: str = ""
-
-
-class DiagramNode(_Strict):
-    """One component in the model's presentation-agnostic change graph."""
-
-    id: str
-    label: str
-    technology: str = ""
-    description: str = ""
-    change: Literal["unchanged", "changed", "new"] = "unchanged"
-
-
-class DiagramEdge(_Strict):
-    """One directed relationship between two diagram node ids."""
-
-    source: str
-    target: str
-    label: str = ""
-
-
-class DiagramStep(_Strict):
-    """One ordered run-time interaction between two diagram node ids.
-
-    Where an edge says two components are related, a step says what happens and
-    when — the behaviour view of the same change. ``reply`` renders the dashed
-    return arrow.
-    """
-
-    source: str
-    target: str
-    label: str = ""
-    reply: bool = False
-
-
-class DiagramResult(_Strict):
-    """Structured-output envelope for the change-diagram pass.
-
-    The model returns presentation-agnostic nodes, edges, and ordered steps.
-    lgtmaybe renders Mermaid (a flowchart of the structure, a sequence diagram
-    of the flow) and text locally so model-authored syntax never reaches a
-    Mermaid fence.
-    """
-
-    title: str = ""
-    summary: str = ""
-    nodes: list[DiagramNode] = Field(default_factory=list)
-    edges: list[DiagramEdge] = Field(default_factory=list)
-    steps: list[DiagramStep] = Field(default_factory=list)
-    notes: str = ""
-
-
-#: The closed taxonomy of the change overview's High Impact Areas section: the
-#: kinds of change a reviewer must not miss. Ordered as they render, worst-blast-
-#: radius first. A closed Literal on purpose — an invented area would render an
-#: unknown heading, so drifted output is rejected at the boundary instead.
-HighImpactKind = Literal[
-    "infrastructure",
-    "security",
-    "availability",
-    "data_migration",
-    "backup_and_recovery",
-    "compatibility",
-    "observability",
-    "dependencies",
-    "cost",
-    "compliance",
-]
-
-
-class HighImpactArea(_Strict):
-    """One call-out in the High Impact Areas section.
-
-    ``files`` are paths from the diff (any path the PR did not change is
-    dropped before rendering), ``why`` is the blast radius and ``check`` the
-    one thing a reviewer should verify.
-    """
-
-    area: HighImpactKind
-    title: str
-    files: list[str] = Field(default_factory=list)
-    why: str = ""
-    check: str = ""
-    severity: Literal["medium", "high", "critical"] = "high"
-
-
-class HighImpactResult(_Strict):
-    """Structured-output envelope for the high-impact pass.
-
-    An empty ``areas`` list is a real answer — "nothing here qualifies" — and
-    renders as the checked-and-clear line, never as a missing section.
-    """
-
-    areas: list[HighImpactArea] = Field(default_factory=list)
-    notes: str = ""
-
-
-class AnswerResult(_Strict):
-    """Task-specific structured envelope for a slash-command answer."""
-
-    answer: str
-
-
-class TriageFileVerdict(_Strict):
-    """One triage verdict: whether *path* needs the strong model, and how risky."""
-
-    path: str
-    review: bool = True
-    risk: int = Field(default=5, ge=0, le=10)
-
-
-class TriageResult(_Strict):
-    """Structured-output envelope for the triage pass: ``{"files": [...]}``.
-
-    A fixed-shape object so it can be enforced as a JSON schema via litellm
-    ``response_format``, the same way reviews and reflection verdicts are.
-    """
-
-    files: list[TriageFileVerdict]
-
-
 class ProviderResult(_Strict):
     """The normalised return of one LLM completion, with token usage."""
 
@@ -994,30 +855,16 @@ class ReviewSubmission(_Strict):
         return self
 
 
-class ReviewConfig(_Strict):
-    """How to run one review: provider/model, severity floor, filters, caps."""
+class BatchingConfig(_Strict):
+    """How the diff becomes model calls: which files, how much of each, how much
+    context around a hunk, and the per-call input budget.
 
-    provider: Provider
-    model: str
-    api_base: str | None = None
-    # Severity floor: findings below this are dropped before posting. Defaults to
-    # `low` (not `info`) so pure-info narration — a finding that merely restates
-    # the diff ("X was removed") — never reaches the PR. Raise it to `medium` for
-    # a weak/fast model that still over-reports.
-    min_severity: Severity = Severity.low
-    # Stricter floor applied only to UNANCHORED findings — ones whose verbatim
-    # anchor matched no changed line, so the engine could not place them. A failed
-    # anchor is a low-confidence signal (a weak model miscounting), so only a
-    # high/critical guess is worth surfacing (demoted to the review body, never
-    # posted on a line we can't stand behind); anything weaker is dropped.
-    unanchored_min_severity: Severity = Severity.high
-    # Merge-gate threshold. When set, after posting the review the GitHub adapter
-    # creates a Check Run whose conclusion is `failure` if any surviving finding
-    # is at or above this severity, else `success` — so a team can make lgtmaybe a
-    # required check in branch protection. Enforcement rides the Check Run, never
-    # PR approval state (lgtmaybe never sets approval state). None (default) = off,
-    # non-breaking: no check run is created.
-    fail_on: Severity | None = None
+    Read by the preparation stages that filter, cap, expand and split the diff,
+    and wherever a later pass sizes its own prompt against ``max_input_tokens``.
+    Each key can also be set flat at the top level of the config (see
+    ``ReviewConfig``).
+    """
+
     include_paths: list[str] = Field(default_factory=list)
     exclude_paths: list[str] = Field(default_factory=list)
     max_files: int = 50
@@ -1044,29 +891,6 @@ class ReviewConfig(_Strict):
     # each call's context stays small — better recall on big files, especially for
     # smaller models. Files within budget are reviewed whole (context preserved).
     recursive: bool = True
-    # Mid-review retrieval: let a review LENS defer once for bounded, read-only
-    # codebase context. The shared rules tell every lens to hedge or omit a claim
-    # that hinges on code outside the diff; with this on it may instead answer
-    # `needs` (paths/symbols), and the engine fetches them (redacted, capped at
-    # engine.retrieve.MAX_FETCH_FILES files and a quarter of max_input_tokens)
-    # and re-runs that one lens with them. Bounded to ONE extra call per (batch,
-    # lens) — which is exactly why it defaults OFF: a weak model defers
-    # constantly and the recall win is unmeasured. Needs an injected file reader
-    # (the GitHub gateway, or the local worktree), and reuses the same read-only
-    # fetch path reflection's deferral uses. See docs/how-to/reduce-review-cost.md.
-    mid_review_retrieval: bool = False
-    # Cross-file symbol resolution during reflection: when the auditor defers a
-    # finding because it needs to see a SYMBOL (function/class/type) defined outside
-    # the diff, ast-grep locates that symbol's file in the corpus (the local
-    # worktree, or a checkout of the trusted base branch) so the auditor re-judges
-    # with the real definition instead of guessing. Needs the ast-grep binary (a
-    # bundled dependency) and a corpus; degrades to the path-only fetch otherwise.
-    symbol_resolution: bool = True
-    # Ollama's context window (num_ctx). Ollama only — hosted providers manage
-    # their own context window server-side and litellm won't forward this, so it
-    # is ignored for them. None keeps the factory default (32768); raise it so a
-    # large multi-file diff plus the emitted findings isn't truncated.
-    num_ctx: int | None = None
     # Ceiling on surrounding context lines added around each hunk. The engine
     # uses min(context_lines, what the token budget allows); 0 disables it.
     context_lines: int = 20
@@ -1076,6 +900,68 @@ class ReviewConfig(_Strict):
     # an arbitrary cut. Falls back to the fixed-line pad for unsupported
     # languages or any ast-grep failure. Off = fixed-line padding only.
     function_context: bool = True
+
+
+class LimitsConfig(_Strict):
+    """Whole-run ceilings: wall clock, billable tokens, findings per call, and
+    how many calls run at once.
+
+    Read by the run state every call shares and by the fan-out pool. Each key
+    can also be set flat at the top level of the config.
+    """
+
+    # Soft wall-clock ceiling for one review run, in seconds. Once it passes,
+    # no further model calls are dispatched: in-flight calls finish, their
+    # findings post, and the summary carries the existing "results may be
+    # incomplete" notice naming the skipped calls. It can never turn a total
+    # failure into a silent LGTM — a run where every call failed or was
+    # skipped still fails loud. Generous by default (60 minutes — 2× the
+    # generous per-call timeout, so one slow gateway/local call can't eat the
+    # whole review budget); 0 disables the ceiling entirely.
+    max_review_seconds: int = Field(default=3600, ge=0)
+    # Soft billable-token ceiling for one review run (input + output summed
+    # across every model call: lens fan-out, triage, reflection). Behaves
+    # exactly like max_review_seconds — once passed, no further model calls are
+    # dispatched, in-flight calls finish, their findings post, and the summary
+    # carries a notice naming this knob. It can never turn a total failure into
+    # a silent LGTM.
+    #
+    # 0 (the default) disables it. Unlike the wall-clock ceiling there is no
+    # safe generous default: token spend scales with diff size, lens count and
+    # batch count, so any figure that protects a small repo silently truncates
+    # a large one's review. Measurement is always on (`--profile`, and the
+    # structured `provider call` log lines) — read a real run's total, then set
+    # this above it. See docs/how-to/reduce-review-cost.md.
+    max_review_tokens: int = Field(default=0, ge=0)
+    # Ceiling on the findings ONE (batch, lens) call may contribute. This is a
+    # backstop against a degenerate response rather than a review budget. A model
+    # under structured output can restate one claim across every line it sees:
+    # measured, a single lens returned 319 of a review's 323 findings on a diff
+    # with nothing wrong in it, each at a distinct (path, line), so the location
+    # dedupe collapsed none of them. `max_tokens` bounds a response that decodes
+    # without terminating; this bounds one that stays within its token budget and
+    # repeats itself.
+    #
+    # When it fires the highest-severity findings are kept, and the summary names
+    # the lens and how many were dropped so the truncation is visible. 50 is far
+    # above any per-lens yield observed (a busy security lens on a large batch
+    # runs to a dozen), so an ordinary review does not reach it; 0 disables the
+    # bound.
+    max_findings_per_lens: int = Field(default=50, ge=0)
+    # Ceiling on concurrent review calls across the WHOLE fan-out (every
+    # (batch, lens) task shares one pool). None means 6 for every provider.
+    # Local throughput is set on the server; use 1 here for a serial local run.
+    max_concurrency: int | None = Field(default=None, ge=1)
+
+
+class RequestConfig(_Strict):
+    """How each completion request is shaped: its timeout, sampling, output and
+    reasoning budget, and ollama's context window.
+
+    Read only where the provider client is built. Each key can also be set flat
+    at the top level of the config.
+    """
+
     # Per-request timeout (seconds) for each provider completion call. None means
     # "auto": the factory picks a provider-aware default (long for providers that
     # may front a slow model — ollama, openai-compatible, openrouter — short for
@@ -1121,6 +1007,124 @@ class ReviewConfig(_Strict):
     reasoning_effort: (
         Literal["none", "minimal", "low", "medium", "high", "xhigh", "default"] | None
     ) = None
+    # Ollama's context window (num_ctx). Ollama only — hosted providers manage
+    # their own context window server-side and litellm won't forward this, so it
+    # is ignored for them. None keeps the factory default (32768); raise it so a
+    # large multi-file diff plus the emitted findings isn't truncated.
+    num_ctx: int | None = None
+
+    @field_validator("timeout")
+    @classmethod
+    def _timeout_is_positive(cls, value: int | None) -> int | None:
+        # 0 reads as "off" for every other duration knob, but a 0s per-call
+        # timeout fails every request at once, so reject it at the boundary.
+        if value is not None and value <= 0:
+            raise ValueError(
+                f"timeout must be a positive number of seconds (got {value}); "
+                "leave it unset for the provider-aware default"
+            )
+        return value
+
+
+#: ReviewConfig's grouped settings: the field each group lives under, and its
+#: model. A flat key naming any member is lifted into its group on validation.
+_CONFIG_GROUPS: dict[str, type[_Strict]] = {
+    "batching": BatchingConfig,
+    "limits": LimitsConfig,
+    "request": RequestConfig,
+}
+#: Each grouped flat key, mapped to the group it belongs to.
+_GROUP_OF_FLAT_KEY: dict[str, str] = {
+    key: group for group, model in _CONFIG_GROUPS.items() for key in model.model_fields
+}
+
+
+def _lift_flat_keys(data: dict[str, Any]) -> dict[str, Any]:
+    """Return *data* with every flat grouped key moved under its group.
+
+    Flat and nested keys of one group merge, so a user layer's ``max_files`` and
+    a repo file's ``batching: {context_lines: 5}`` both survive. A key given
+    both ways is ambiguous and rejected by name. A group passed as a model
+    instance contributes only the fields it set, so a defaulted field stays
+    defaulted (``model_fields_set``) after the merge.
+    """
+    flat = [key for key in data if key in _GROUP_OF_FLAT_KEY]
+    if not flat:
+        return data
+    lifted = {key: value for key, value in data.items() if key not in _GROUP_OF_FLAT_KEY}
+    for key in flat:
+        group = _GROUP_OF_FLAT_KEY[key]
+        nested = lifted.get(group, {})
+        if isinstance(nested, BaseModel):
+            nested = nested.model_dump(exclude_unset=True)
+        if not isinstance(nested, Mapping):
+            # Leave a malformed group for field validation to reject by type.
+            continue
+        if key in nested:
+            raise ValueError(
+                f"{key!r} is set both at the top level and under {group!r}; set it once"
+            )
+        lifted[group] = {**nested, key: data[key]}
+    return lifted
+
+
+class ReviewConfig(_Strict):
+    """How to run one review: provider/model, severity floor, filters, caps.
+
+    Settings one stage reads together live in a group (``batching``, ``limits``,
+    ``request``, like ``static_analysis`` and ``risk``), so a reader names the
+    group it depends on: ``cfg.batching.max_input_tokens``. Every surface that
+    sets config still speaks the flat keys (``max_input_tokens: 40000`` in
+    ``.lgtmaybe.yml``, ``lgtmaybe config set``, CLI flags, Action inputs,
+    ``ReviewConfig(max_input_tokens=...)``): ``_lift_groups`` moves each into
+    its group before validation. ``flat_fields`` is that flat key set.
+    """
+
+    provider: Provider
+    model: str
+    api_base: str | None = None
+    # Severity floor: findings below this are dropped before posting. Defaults to
+    # `low` (not `info`) so pure-info narration — a finding that merely restates
+    # the diff ("X was removed") — never reaches the PR. Raise it to `medium` for
+    # a weak/fast model that still over-reports.
+    min_severity: Severity = Severity.low
+    # Stricter floor applied only to UNANCHORED findings — ones whose verbatim
+    # anchor matched no changed line, so the engine could not place them. A failed
+    # anchor is a low-confidence signal (a weak model miscounting), so only a
+    # high/critical guess is worth surfacing (demoted to the review body, never
+    # posted on a line we can't stand behind); anything weaker is dropped.
+    unanchored_min_severity: Severity = Severity.high
+    # Merge-gate threshold. When set, after posting the review the GitHub adapter
+    # creates a Check Run whose conclusion is `failure` if any surviving finding
+    # is at or above this severity, else `success` — so a team can make lgtmaybe a
+    # required check in branch protection. Enforcement rides the Check Run, never
+    # PR approval state (lgtmaybe never sets approval state). None (default) = off,
+    # non-breaking: no check run is created.
+    fail_on: Severity | None = None
+    # Grouped settings, each also settable by its flat key. `default=` (not
+    # default_factory) so the defaults reach the JSON schema the config
+    # reference renders, as with `risk` and `static_analysis`.
+    batching: BatchingConfig = Field(default=BatchingConfig())
+    limits: LimitsConfig = Field(default=LimitsConfig())
+    request: RequestConfig = Field(default=RequestConfig())
+    # Mid-review retrieval: let a review LENS defer once for bounded, read-only
+    # codebase context. The shared rules tell every lens to hedge or omit a claim
+    # that hinges on code outside the diff; with this on it may instead answer
+    # `needs` (paths/symbols), and the engine fetches them (redacted, capped at
+    # engine.retrieve.MAX_FETCH_FILES files and a quarter of max_input_tokens)
+    # and re-runs that one lens with them. Bounded to ONE extra call per (batch,
+    # lens) — which is exactly why it defaults OFF: a weak model defers
+    # constantly and the recall win is unmeasured. Needs an injected file reader
+    # (the GitHub gateway, or the local worktree), and reuses the same read-only
+    # fetch path reflection's deferral uses. See docs/how-to/reduce-review-cost.md.
+    mid_review_retrieval: bool = False
+    # Cross-file symbol resolution during reflection: when the auditor defers a
+    # finding because it needs to see a SYMBOL (function/class/type) defined outside
+    # the diff, ast-grep locates that symbol's file in the corpus (the local
+    # worktree, or a checkout of the trusted base branch) so the auditor re-judges
+    # with the real definition instead of guessing. Needs the ast-grep binary (a
+    # bundled dependency) and a corpus; degrades to the path-only fetch otherwise.
+    symbol_resolution: bool = True
     # Run the self-reflection pass that filters low-confidence findings. Disable
     # it (--no-reflect) when a weaker model drops valid findings during reflection.
     reflect: bool = True
@@ -1301,48 +1305,6 @@ class ReviewConfig(_Strict):
     # fans out as its own focused call and merges into the same findings. Loaded
     # from .lgtmaybe.yml (inline) or skill files via the loader's `lens_paths`.
     extra_lenses: list[CustomLens] = Field(default_factory=list)
-    # Soft wall-clock ceiling for one review run, in seconds. Once it passes,
-    # no further model calls are dispatched: in-flight calls finish, their
-    # findings post, and the summary carries the existing "results may be
-    # incomplete" notice naming the skipped calls. It can never turn a total
-    # failure into a silent LGTM — a run where every call failed or was
-    # skipped still fails loud. Generous by default (60 minutes — 2× the
-    # generous per-call timeout, so one slow gateway/local call can't eat the
-    # whole review budget); 0 disables the ceiling entirely.
-    max_review_seconds: int = Field(default=3600, ge=0)
-    # Soft billable-token ceiling for one review run (input + output summed
-    # across every model call: lens fan-out, triage, reflection). Behaves
-    # exactly like max_review_seconds — once passed, no further model calls are
-    # dispatched, in-flight calls finish, their findings post, and the summary
-    # carries a notice naming this knob. It can never turn a total failure into
-    # a silent LGTM.
-    #
-    # 0 (the default) disables it. Unlike the wall-clock ceiling there is no
-    # safe generous default: token spend scales with diff size, lens count and
-    # batch count, so any figure that protects a small repo silently truncates
-    # a large one's review. Measurement is always on (`--profile`, and the
-    # structured `provider call` log lines) — read a real run's total, then set
-    # this above it. See docs/how-to/reduce-review-cost.md.
-    max_review_tokens: int = Field(default=0, ge=0)
-    # Ceiling on the findings ONE (batch, lens) call may contribute. This is a
-    # backstop against a degenerate response rather than a review budget. A model
-    # under structured output can restate one claim across every line it sees:
-    # measured, a single lens returned 319 of a review's 323 findings on a diff
-    # with nothing wrong in it, each at a distinct (path, line), so the location
-    # dedupe collapsed none of them. `max_tokens` bounds a response that decodes
-    # without terminating; this bounds one that stays within its token budget and
-    # repeats itself.
-    #
-    # When it fires the highest-severity findings are kept, and the summary names
-    # the lens and how many were dropped so the truncation is visible. 50 is far
-    # above any per-lens yield observed (a busy security lens on a large batch
-    # runs to a dozen), so an ordinary review does not reach it; 0 disables the
-    # bound.
-    max_findings_per_lens: int = Field(default=50, ge=0)
-    # Ceiling on concurrent review calls across the WHOLE fan-out (every
-    # (batch, lens) task shares one pool). None means 6 for every provider.
-    # Local throughput is set on the server; use 1 here for a serial local run.
-    max_concurrency: int | None = Field(default=None, ge=1)
     # Constrain model output to the findings JSON schema via litellm
     # response_format (provider-native JSON mode). Keeps models from returning
     # prose/reasoning instead of findings. Disable for a model/provider that
@@ -1367,17 +1329,33 @@ class ReviewConfig(_Strict):
     # skip the schema instead of failing the same way.
     retry_without_schema: bool = True
 
-    @field_validator("timeout")
+    @model_validator(mode="before")
     @classmethod
-    def _timeout_is_positive(cls, value: int | None) -> int | None:
-        # 0 reads as "off" for every other duration knob, but a 0s per-call
-        # timeout fails every request at once, so reject it at the boundary.
-        if value is not None and value <= 0:
-            raise ValueError(
-                f"timeout must be a positive number of seconds (got {value}); "
-                "leave it unset for the provider-aware default"
-            )
-        return value
+    def _lift_groups(cls, data: Any) -> Any:
+        return _lift_flat_keys(data) if isinstance(data, dict) else data
+
+    @classmethod
+    def flat_fields(cls) -> dict[str, FieldInfo]:
+        """Every flat config key and its field: the top-level fields, with each
+        group replaced by its members. What a key-by-key surface (the user
+        store, the Action inputs) enumerates and coerces against."""
+        fields: dict[str, FieldInfo] = {}
+        for name, info in cls.model_fields.items():
+            group = _CONFIG_GROUPS.get(name)
+            fields.update(group.model_fields if group is not None else {name: info})
+        return fields
+
+    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
+        # model_copy skips validation, so a flat grouped key would become an
+        # orphan attribute no reader looks at. Make the caller name the group.
+        for key in update or {}:
+            if key in _GROUP_OF_FLAT_KEY:
+                group = _GROUP_OF_FLAT_KEY[key]
+                raise ValueError(
+                    f"{key!r} lives under {group!r}: update it with "
+                    f"model_copy(update={{{group!r}: cfg.{group}.model_copy(update=...)}})"
+                )
+        return super().model_copy(update=update, deep=deep)
 
     @model_validator(mode="after")
     def _apply_project_stage(self) -> ReviewConfig:

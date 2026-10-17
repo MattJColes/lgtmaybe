@@ -22,8 +22,9 @@ from pydantic import BaseModel
 
 from lgtmaybe.core.comment import code_span, strip_markers
 from lgtmaybe.core.logging import get_logger
-from lgtmaybe.core.models import DescribeResult, PRContext, ReviewConfig
+from lgtmaybe.core.models import PRContext, ReviewConfig
 from lgtmaybe.core.ports import ProviderClient
+from lgtmaybe.core.schemas import DescribeResult
 from lgtmaybe.engine.compress import count_tokens, take_lines
 from lgtmaybe.engine.injection import DIFF_END, DIFF_START, neutralise, wrap_intent
 from lgtmaybe.engine.parse import parse_structured
@@ -169,7 +170,7 @@ def structured_call(
     if intent:
         parts.append(wrap_intent(redact(intent)))
     parts.extend(extra_blocks)
-    diff = _fit_diff(redact(ctx.diff), cfg.max_input_tokens)
+    diff = _fit_diff(redact(ctx.diff), cfg.batching.max_input_tokens)
     parts.append(f"{diff_preamble}{DIFF_START}\n{neutralise(diff)}\n{DIFF_END}")
     user = "\n\n".join(parts) + task_suffix
 

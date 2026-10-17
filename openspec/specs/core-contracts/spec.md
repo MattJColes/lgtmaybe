@@ -110,6 +110,25 @@ rejected by strict configuration validation rather than accepted as no-ops.
 - **THEN** config validation fails, rather than the route rejecting every lens
   call mid-review
 
+### Requirement: Grouped configuration still accepts every flat key
+
+`ReviewConfig` SHALL accept each grouped setting (`batching`, `limits`,
+`request`) as its flat top-level key or nested under its group, so config
+files, store keys, CLI flags and Action inputs keep working. A key given both
+ways SHALL be rejected by name, and unknown keys at either level. A defaulted
+field SHALL stay out of its group's `model_fields_set` when a sibling is set.
+`model_copy` SHALL refuse a flat grouped key, as it skips validation.
+<!-- anchor: core.config-groups -->
+
+#### Scenario: an existing flat config loads
+- **WHEN** `.lgtmaybe.yml` sets `max_input_tokens`, `max_review_seconds` and
+  `timeout` at the top level
+- **THEN** they load into `batching`, `limits` and `request`
+
+#### Scenario: a key is set flat and nested
+- **WHEN** configuration sets `max_files` and `batching.max_files`
+- **THEN** validation fails, naming the key and its group
+
 ### Requirement: Built-in lenses and preset fan-out
 
 `ReviewCategory` SHALL enumerate the built-in lenses: ten everyday categories

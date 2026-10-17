@@ -75,10 +75,10 @@ def validate_findings(
     """Return one safe verdict per active finding; ambiguity is uncertain."""
     if not findings:
         return []
-    if _input_size(findings, ctx) > cfg.max_input_tokens * 4:
+    if _input_size(findings, ctx) > cfg.batching.max_input_tokens * 4:
         return _uncertain(findings, "validation context exceeds the input budget")
     context = _context(findings, ctx)
-    if len(context) > cfg.max_input_tokens * 4:
+    if len(context) > cfg.batching.max_input_tokens * 4:
         return _uncertain(findings, "validation context exceeds the input budget")
     messages = [
         {"role": "system", "content": _SYSTEM},

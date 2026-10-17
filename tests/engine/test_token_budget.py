@@ -95,7 +95,7 @@ class TestReviewTokenBudget:
     def test_off_by_default(self) -> None:
         """Enforcement is opt-in: token spend varies far too much by repo for a
         default cap to be anything but a silent quality regression."""
-        assert _cfg().max_review_tokens == 0
+        assert _cfg().limits.max_review_tokens == 0
         provider = _CostlyProvider()
         _, summary = LLMReviewEngine(provider).review(_CTX, _cfg())
         assert len(provider.calls) == 3

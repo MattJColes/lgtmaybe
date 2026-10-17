@@ -248,7 +248,7 @@ class TestReviewCommandLocal:
 
         class _CapturingEngine(FakeEngine):
             def review(self, ctx, cfg):
-                seen["max_file_diff_lines"] = cfg.max_file_diff_lines
+                seen["max_file_diff_lines"] = cfg.batching.max_file_diff_lines
                 return super().review(ctx, cfg)
 
         _patch_local(monkeypatch, engine=_CapturingEngine(FakeProvider()))
@@ -274,7 +274,7 @@ class TestReviewCommandLocal:
 
         class _CapturingEngine(FakeEngine):
             def review(self, ctx, cfg):
-                seen.update(max_files=cfg.max_files, recursive=cfg.recursive)
+                seen.update(max_files=cfg.batching.max_files, recursive=cfg.batching.recursive)
                 return super().review(ctx, cfg)
 
         _patch_local(monkeypatch, engine=_CapturingEngine(FakeProvider()))
@@ -389,7 +389,7 @@ class TestDiagramCommand:
                 "notes": "",
             }
         )
-        from lgtmaybe.core.models import DescribeResult, DiagramResult, HighImpactResult
+        from lgtmaybe.core.schemas import DescribeResult, DiagramResult, HighImpactResult
 
         provider = FakeProvider(
             results_by_schema={

@@ -22,8 +22,9 @@ from typing import Any
 
 from lgtmaybe.core.diffparse import changed_line_count
 from lgtmaybe.core.logging import get_logger
-from lgtmaybe.core.models import ReviewConfig, TriageResult
+from lgtmaybe.core.models import ReviewConfig
 from lgtmaybe.core.ports import ProviderClient
+from lgtmaybe.core.schemas import TriageResult
 
 from .injection import neutralise
 from .parse import parse_structured

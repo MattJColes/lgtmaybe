@@ -248,7 +248,7 @@ class Profiler:
         counts the same way.
 
         Process-wide, for ``--profile`` and the CLI's total line only. It does
-        NOT back :attr:`ReviewConfig.max_review_tokens`: two reviews in one
+        NOT back :attr:`LimitsConfig.max_review_tokens`: two reviews in one
         process would each be charged for the other's calls. The engine keeps
         that tally per run instead.
         """

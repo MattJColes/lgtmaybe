@@ -132,18 +132,18 @@ def test_review_config_api_base_defaults_to_none() -> None:
 def test_review_config_timeout_defaults_to_none_auto() -> None:
     # None means "auto" — the factory resolves a provider-aware default.
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
-    assert cfg.timeout is None
+    assert cfg.request.timeout is None
 
 
 def test_review_config_accepts_timeout() -> None:
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3", timeout=600)
-    assert cfg.timeout == 600
+    assert cfg.request.timeout == 600
 
 
 def test_review_config_accepts_the_smallest_timeout() -> None:
     # 1 is the floor: the accepted range is "any positive number of seconds".
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3", timeout=1)
-    assert cfg.timeout == 1
+    assert cfg.request.timeout == 1
 
 
 @pytest.mark.parametrize("timeout", [0, -30])
@@ -157,12 +157,12 @@ def test_review_config_rejects_non_positive_timeout(timeout: int) -> None:
 def test_review_config_recursive_defaults_true() -> None:
     # RLM-style hunk walk for over-budget files is active by default.
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
-    assert cfg.recursive is True
+    assert cfg.batching.recursive is True
 
 
 def test_review_config_accepts_recursive_false() -> None:
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3", recursive=False)
-    assert cfg.recursive is False
+    assert cfg.batching.recursive is False
 
 
 def test_review_config_symbol_resolution_defaults_true() -> None:
@@ -252,12 +252,12 @@ def test_review_config_accepts_ignore_fingerprints() -> None:
 
 def test_review_config_temperature_defaults_to_zero() -> None:
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
-    assert cfg.temperature == 0.0
+    assert cfg.request.temperature == 0.0
 
 
 def test_review_config_accepts_temperature() -> None:
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3", temperature=0.7)
-    assert cfg.temperature == 0.7
+    assert cfg.request.temperature == 0.7
 
 
 def test_custom_lens_minimal_fields() -> None:
@@ -282,7 +282,7 @@ def test_reasoning_effort_defaults_to_unset() -> None:
     """Off unless asked for: a route that does not accept the param must not
     start receiving it because lgtmaybe upgraded."""
     cfg = ReviewConfig(provider=Provider.openrouter, model="vendor/m")
-    assert cfg.reasoning_effort is None
+    assert cfg.request.reasoning_effort is None
 
 
 def test_custom_lens_id_must_not_collide_with_builtin() -> None:
@@ -486,7 +486,7 @@ def test_overview_sections_are_on_by_default() -> None:
 def test_high_impact_area_rejects_an_unknown_area() -> None:
     """The taxonomy is a closed set — a model inventing an area is drifted
     output, and _Strict rejects it rather than rendering an unknown heading."""
-    from lgtmaybe.core.models import HighImpactArea
+    from lgtmaybe.core.schemas import HighImpactArea
 
     with pytest.raises(ValidationError):
         HighImpactArea(area="vibes", title="t")
@@ -498,7 +498,7 @@ def test_high_impact_area_rejects_an_unknown_area() -> None:
 
 def test_high_impact_result_defaults_to_no_areas() -> None:
     """An empty answer must be expressible: "nothing qualifies" is a result."""
-    from lgtmaybe.core.models import HighImpactResult
+    from lgtmaybe.core.schemas import HighImpactResult
 
     assert HighImpactResult.model_validate({"areas": []}).areas == []
 
@@ -602,3 +602,29 @@ def test_a_refused_degradation_stamp_does_not_cost_the_other() -> None:
     stamp_degradation(exc, schema_dropped=True, temperature_dropped=True)
     assert not schema_dropped_on(exc)
     assert temperature_dropped_on(exc)
+
+
+def test_model_output_schemas_live_in_core_schemas_not_models() -> None:
+    """The auxiliary passes' output envelopes are their own module (#836):
+    core.models holds how a review runs and what a forge sends, not what a
+    describe/diagram/high-impact/triage/answer call must return."""
+    import lgtmaybe.core.models as models
+    import lgtmaybe.core.schemas as schemas
+
+    moved = [
+        "AnswerResult",
+        "DescribeResult",
+        "DiagramEdge",
+        "DiagramNode",
+        "DiagramResult",
+        "DiagramStep",
+        "FileWalkthrough",
+        "HighImpactArea",
+        "HighImpactKind",
+        "HighImpactResult",
+        "TriageFileVerdict",
+        "TriageResult",
+    ]
+    for name in moved:
+        assert hasattr(schemas, name), name
+        assert not hasattr(models, name), name

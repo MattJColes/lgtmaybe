@@ -432,7 +432,7 @@ def test_grounding_truncates_huge_file_within_budget() -> None:
 
     user = _user_text(provider.calls[0])
     # The whole file (~120k tokens) would blow the 4k budget; truncation keeps it bounded.
-    assert count_tokens(user) <= cfg.max_input_tokens * 2
+    assert count_tokens(user) <= cfg.batching.max_input_tokens * 2
 
 
 def test_head_tail_returns_text_and_accurate_token_count() -> None:
@@ -917,7 +917,9 @@ def test_deferred_file_reaches_recheck_when_full_diff_exceeds_batch_budget() -> 
     ctx = _CTX.model_copy(
         update={"diff": changed + unrelated, "changed_files": ["a.py", "unrelated.py"]}
     )
-    cfg = _CFG.model_copy(update={"max_input_tokens": 4000})
+    cfg = _CFG.model_copy(
+        update={"batching": _CFG.batching.model_copy(update={"max_input_tokens": 4000})}
+    )
     provider = _ScriptedProvider(
         [
             _needs_envelope(0, ["other.py"]),
@@ -1061,7 +1063,9 @@ def test_multi_batch_diff_audit_prompt_stays_within_input_budget() -> None:
     ctx = _CTX.model_copy(
         update={"diff": "".join(patches), "changed_files": ["a.py", "b.py", "c.py"]}
     )
-    cfg = _CFG.model_copy(update={"max_input_tokens": 6_000})
+    cfg = _CFG.model_copy(
+        update={"batching": _CFG.batching.model_copy(update={"max_input_tokens": 6_000})}
+    )
     provider = _fake_with_verdict({0: True})
     notices: list[str] = []
 
@@ -1086,7 +1090,9 @@ def test_flagged_files_that_overrun_the_room_are_cut_in_diff_order() -> None:
     ctx = _CTX.model_copy(
         update={"diff": "".join(patches), "changed_files": ["a.py", "b.py", "c.py"]}
     )
-    cfg = _CFG.model_copy(update={"max_input_tokens": 6_000})
+    cfg = _CFG.model_copy(
+        update={"batching": _CFG.batching.model_copy(update={"max_input_tokens": 6_000})}
+    )
     provider = _fake_with_verdict({0: True, 1: True})
 
     reflect_findings([_HIGH, on_c], ctx, cfg, provider, notices=[])
@@ -1145,7 +1151,9 @@ def test_an_oversized_flagged_patch_is_skipped_not_fatal_to_later_ones() -> None
             "changed_files": ["a.py", "b.py", "c.py"],
         }
     )
-    cfg = _CFG.model_copy(update={"max_input_tokens": 6_000})
+    cfg = _CFG.model_copy(
+        update={"batching": _CFG.batching.model_copy(update={"max_input_tokens": 6_000})}
+    )
     provider = _fake_with_verdict({0: True, 1: True})
     notices: list[str] = []
 
@@ -1176,10 +1184,17 @@ def test_scan_hint_block_counts_against_the_input_budget() -> None:
     # to live unless something gives.
     plain = _fake_with_verdict({0: True, 1: True})
     reflect_findings(
-        [_HIGH, on_b], ctx, _CFG.model_copy(update={"max_input_tokens": 1_000_000}), plain
+        [_HIGH, on_b],
+        ctx,
+        _CFG.model_copy(
+            update={"batching": _CFG.batching.model_copy(update={"max_input_tokens": 1_000_000})}
+        ),
+        plain,
     )
     budget = count_tokens("\n".join(str(m["content"]) for m in plain.calls[0]["messages"]))
-    cfg = _CFG.model_copy(update={"max_input_tokens": budget})
+    cfg = _CFG.model_copy(
+        update={"batching": _CFG.batching.model_copy(update={"max_input_tokens": budget})}
+    )
     hinted = _fake_with_verdict({0: True, 1: True})
     notices: list[str] = []
     hint = ToolFinding(
@@ -1210,7 +1225,9 @@ def test_recheck_pass_that_trims_appends_its_own_notice() -> None:
             "changed_files": ["a.py", "unrelated.py"],
         }
     )
-    cfg = _CFG.model_copy(update={"max_input_tokens": 500})
+    cfg = _CFG.model_copy(
+        update={"batching": _CFG.batching.model_copy(update={"max_input_tokens": 500})}
+    )
     provider = _ScriptedProvider([_needs_envelope(0, ["other.py"]), _envelope([(0, True)])])
     fetcher = _RecordingFetcher({"other.py": "verified_definition = 42\n"})
     notices: list[str] = []
@@ -1227,7 +1244,9 @@ def test_room_exhausted_by_findings_sends_an_empty_diff() -> None:
     diff block. Pinned as deliberate: an empty trimmed diff also arises
     legitimately (a scan-hint finding's file is never in the diff), and the
     trim notice tells the user the auditor saw none of it."""
-    cfg = _CFG.model_copy(update={"max_input_tokens": 1})
+    cfg = _CFG.model_copy(
+        update={"batching": _CFG.batching.model_copy(update={"max_input_tokens": 1})}
+    )
     provider = _fake_with_verdict({0: True})
     notices: list[str] = []
 

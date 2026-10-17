@@ -81,7 +81,7 @@ def load_context_files(cfg: ReviewConfig, root: Path) -> dict[str, str]:
         wanted,
         retrieve.local_file_fetcher(root),
         already=set(),
-        budget_tokens=max(1, cfg.max_input_tokens // _CONTEXT_BUDGET_DIVISOR),
+        budget_tokens=max(1, cfg.batching.max_input_tokens // _CONTEXT_BUDGET_DIVISOR),
         max_files=retrieve.MAX_FETCH_FILES,
     )
 

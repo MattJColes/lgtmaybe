@@ -318,7 +318,7 @@ def _stamp_and_bound(findings: list[ReviewFinding], lens: _Lens, run: _Run) -> l
     reply and a salvaged truncation. They are applied here rather than at
     each return so the three paths cannot diverge. The bound is a backstop
     against a degenerate response rather than a review budget; see
-    `ReviewConfig.max_findings_per_lens`.
+    `LimitsConfig.max_findings_per_lens`.
     """
     findings = _stamp_categories(findings, lens)
     # A finding whose prose is the model's note to itself about its output
@@ -336,7 +336,7 @@ def _stamp_and_bound(findings: list[ReviewFinding], lens: _Lens, run: _Run) -> l
                 "titles": [f.title[:120] for f in self_talk],
             },
         )
-    cap = run.cfg.max_findings_per_lens
+    cap = run.cfg.limits.max_findings_per_lens
     if not cap or len(findings) <= cap:
         return findings
     # Highest severity first, input order preserved within a severity, so

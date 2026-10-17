@@ -21,7 +21,8 @@ import base64
 import json
 import zlib
 
-from lgtmaybe.core.models import DiagramResult, PRContext, Provider, ProviderResult, ReviewConfig
+from lgtmaybe.core.models import PRContext, Provider, ProviderResult, ReviewConfig
+from lgtmaybe.core.schemas import DiagramResult
 from lgtmaybe.features.diagram import build_diagram
 from tests.fakes import FakeProvider
 
@@ -540,7 +541,7 @@ def test_rendered_views_carry_no_title_and_can_be_force_headed() -> None:
 
 
 def test_rendered_views_are_none_without_a_graph() -> None:
-    from lgtmaybe.core.models import DiagramResult as _DR
+    from lgtmaybe.core.schemas import DiagramResult as _DR
     from lgtmaybe.features.diagram import render_diagram_views
 
     assert render_diagram_views(_DR(title="t", nodes=[]), headed=True) is None

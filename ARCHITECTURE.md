@@ -60,6 +60,7 @@ lgtmaybe/
 │   ├── core/                # the hexagon's centre — no outward dependencies
 │   │   ├── ports.py         #   ProviderClient · ReviewGateway · Supports* · ReviewEngine
 │   │   ├── models.py        #   pydantic data contracts (ReviewConfig, ReviewFinding, …)
+│   │   ├── schemas.py       #   output envelopes of the auxiliary model calls (describe, triage, …)
 │   │   ├── forge.py         #   which code host: Forge · PRLocator · URL parsing · tokens
 │   │   ├── diffparse.py     #   unified-diff primitives (file split, hunk headers)
 │   │   ├── diff.py          #   commentable-line index · is_reviewable() skip filter
@@ -193,6 +194,9 @@ involved.
 - **Models** (`models.py`): frozen pydantic contracts with `extra="forbid"` —
   `ReviewConfig`, `ReviewFinding`/`ReviewResult`, `ProviderResult`, `PRContext`,
   the `Severity`/`ReviewCategory`/`Provider` enums, and the reflection envelope.
+- **Output schemas** (`schemas.py`): the structured-output envelopes of the
+  auxiliary model calls (describe, diagram, high impact, triage, `/ask`
+  answers), kept apart from the review contracts.
 - **Diff primitives** (`diffparse.py`) and **secret-safe structured logging**
   (`logging.py`).
 

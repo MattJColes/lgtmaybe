@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import json
 
-from lgtmaybe.core.models import DescribeResult, DiagramResult, ProviderResult
+from lgtmaybe.core.models import ProviderResult
+from lgtmaybe.core.schemas import DescribeResult, DiagramResult
 from tests.fakes import FakeProvider
 
 _DESCRIBE = ProviderResult(text='{"title": "described"}', input_tokens=1, output_tokens=1)

@@ -106,7 +106,7 @@ class TestReviewDeadline:
         cfg = _cfg()
         # 2× the generous per-call timeout (1800s), so one slow gateway/local
         # call can't eat the whole review budget on its own.
-        assert cfg.max_review_seconds == 3600
+        assert cfg.limits.max_review_seconds == 3600
         _, summary = LLMReviewEngine(provider).review(_CTX, cfg)
         assert len(provider.calls) == 3
         assert "deadline" not in summary

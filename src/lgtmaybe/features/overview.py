@@ -22,8 +22,9 @@ from pathlib import Path
 from typing import TypeVar
 
 from lgtmaybe.core.logging import get_logger
-from lgtmaybe.core.models import DiagramResult, PRContext, ReviewConfig
+from lgtmaybe.core.models import PRContext, ReviewConfig
 from lgtmaybe.core.ports import ProviderClient
+from lgtmaybe.core.schemas import DiagramResult
 from lgtmaybe.engine.risk import assess_risk, render_risk_section
 
 from .describe import (

@@ -39,6 +39,12 @@ core.config:
       has: { field: name, regex: '^Severity$' }
     files: [src/lgtmaybe/**/*.py]
 
+core.config-groups:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_lift_flat_keys$' }
+  files: [src/lgtmaybe/core/**/*.py]
+
 core.lenses:
   - rule:
       kind: class_definition

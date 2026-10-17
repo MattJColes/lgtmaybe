@@ -251,7 +251,7 @@ class TestDispatch:
                 "notes": "",
             }
         )
-        from lgtmaybe.core.models import DescribeResult, DiagramResult, HighImpactResult
+        from lgtmaybe.core.schemas import DescribeResult, DiagramResult, HighImpactResult
 
         provider = FakeProvider(
             results_by_schema={

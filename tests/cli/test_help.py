@@ -250,6 +250,6 @@ def test_advanced_review_options_still_parse(monkeypatch) -> None:
     )
 
     cfg = seen["cfg"]
-    assert cfg.num_ctx == 4096  # type: ignore[attr-defined]
+    assert cfg.request.num_ctx == 4096  # type: ignore[attr-defined]
     assert cfg.reflect is False  # type: ignore[attr-defined]
-    assert cfg.max_files == 3  # type: ignore[attr-defined]
+    assert cfg.batching.max_files == 3  # type: ignore[attr-defined]

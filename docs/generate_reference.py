@@ -14,9 +14,12 @@ from pathlib import Path
 from typing import Any
 
 from lgtmaybe.core.models import (
+    BatchingConfig,
+    LimitsConfig,
     PRContext,
     Provider,
     ProviderResult,
+    RequestConfig,
     ReviewConfig,
     ReviewFinding,
     Severity,
@@ -134,6 +137,31 @@ def generate() -> str:
     )
     sections.append(_render_schema_table(review_config_schema))
     sections.append("")
+
+    # The grouped settings: one table per group, since each member is also a
+    # flat top-level key and the table above shows only the group's name.
+    sections.append("### Grouped settings\n")
+    sections.append(
+        "Settings one stage reads together sit in a group. Set each key flat at the "
+        "top level, as before, or under its group. Both forms load the same config. "
+        "Setting one key both ways is an error.\n"
+    )
+    sections.append(
+        "```yaml\n"
+        "max_input_tokens: 40000      # flat\n"
+        "batching:\n"
+        "  context_lines: 5           # nested\n"
+        "```\n"
+    )
+    review_config_defs = review_config_schema.get("$defs", {})
+    for group, model in (
+        ("batching", BatchingConfig),
+        ("limits", LimitsConfig),
+        ("request", RequestConfig),
+    ):
+        sections.append(f"#### `{group}`\n")
+        sections.append(_render_schema_table(review_config_defs[model.__name__]))
+        sections.append("")
 
     # Enums
     sections.append("## Enums\n")
