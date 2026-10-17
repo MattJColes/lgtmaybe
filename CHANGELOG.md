@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.15.2](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.15.1...lgtmaybe-v2.15.2) (2026-10-17)
+
+
+### Bug Fixes
+
+* **ci:** wait out PyPI index lag and winget token quota on release ([#857](https://github.com/MattJColes/lgtmaybe/issues/857)) ([140d197](https://github.com/MattJColes/lgtmaybe/commit/140d1976dc792dd3e80de0454a380dcde05bb17f))
+
 ## [2.15.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.15.0...lgtmaybe-v2.15.1) (2026-10-17)
 
 
