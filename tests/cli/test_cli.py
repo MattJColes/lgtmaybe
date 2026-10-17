@@ -603,12 +603,13 @@ class TestGitHubReviewErrorSurfacing:
         )
 
         class _FailingPostGitHub(IncrementalFakeGitHub):
-            def post_review(self, findings, summary, diff=None):
+            def post_review(self, submission):
                 # The real review post carries the diff; the failure notice
                 # (posted by _post_failure) does not.
-                if diff is not None:
+                if submission.diff is not None:
+                    self.marked_reviewed.append(submission.completed_sha)
                     raise RuntimeError("post exploded")
-                super().post_review(findings, summary, diff)
+                super().post_review(submission)
 
         github = _FailingPostGitHub(CTX)
         monkeypatch.setattr(
@@ -620,8 +621,8 @@ class TestGitHubReviewErrorSurfacing:
         with pytest.raises(click.ClickException):
             cli_module.execute_review(_default_cfg(), RuntimeOptions(pr_url="x"))
 
-        # The watermark was stamped before the post, then cleared before the
-        # failure notice went out.
+        # The review post carried the completed head; the failure notice,
+        # posted through the same gateway afterwards, carries none.
         assert github.marked_reviewed == ["head2222", None]
         assert len(github.posted) == 1  # only the failure notice landed
         assert "fail" in github.posted[0][1].lower()
@@ -963,15 +964,8 @@ class TestDiffUnavailable:
         reason = self.REASON
 
         class _NoDiffGitHub(FakeGitHub):
-            def __init__(self):
-                super().__init__()
-                self.marked_reviewed: list[str | None] = []
-
             def get_pr_context(self):
                 raise DiffUnavailable(reason)
-
-            def mark_reviewed(self, head_sha):
-                self.marked_reviewed.append(head_sha)
 
         return _NoDiffGitHub()
 
@@ -1005,7 +999,7 @@ class TestDiffUnavailable:
         assert "failed" not in summary.lower()
         assert "<!-- lgtmaybe-skipped -->" in summary
         # Nothing is stamped complete and no overview is attempted.
-        assert all(sha is None for sha in github.marked_reviewed)
+        assert all(s.completed_sha is None for s in github.submissions)
         assert github.diagrams == []
 
     @pytest.mark.parametrize("command", ["/review", "/improve", "/describe", "/diagram"])

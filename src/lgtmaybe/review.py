@@ -30,13 +30,18 @@ from lgtmaybe.core.comment import (
 from lgtmaybe.core.diff import diff_fingerprint
 from lgtmaybe.core.diffparse import split_by_file
 from lgtmaybe.core.logging import get_logger
-from lgtmaybe.core.models import PRContext, ReviewConfig, ReviewFinding, Severity
+from lgtmaybe.core.models import (
+    PRContext,
+    ReviewConfig,
+    ReviewFinding,
+    ReviewSubmission,
+    Severity,
+)
 from lgtmaybe.core.ports import (
     ProviderClient,
     ReviewEngine,
     ReviewGateway,
     SupportsChecks,
-    SupportsCompletionMark,
     SupportsConversation,
     SupportsDescribe,
     SupportsDiagram,
@@ -150,6 +155,7 @@ def run_review(
     review_ctx = _apply_learned_feedback(github, review_ctx, cfg)
     findings, summary = engine.review(review_ctx, cfg)
 
+    validated_fixed: frozenset[str] | None = None
     if incremental_since is not None:
         # LEFT-side line numbers in an incremental diff are relative to the
         # last-reviewed head, not the PR base — posting them would mis-anchor,
@@ -161,7 +167,9 @@ def run_review(
                 extra={"count": len(dropped)},
             )
         findings = [f for f in findings if f.side == "RIGHT"]
-        validation_summary = _validate_prior_findings(github, provider, cfg, review_ctx, findings)
+        validation_summary, validated_fixed = _validate_prior_findings(
+            github, provider, cfg, review_ctx, findings
+        )
         summary += (
             f"\n\n_Incremental review of the changes since {incremental_since[:7]}. "
             "Earlier findings stay open until fixed._"
@@ -172,20 +180,30 @@ def run_review(
         summary += f"\n\n{overview_note}"
 
     if not dry_run:
-        # Prepare the watermark for the review body. This is only in-memory
-        # adapter state until post_review succeeds, so an interruption here
-        # cannot remotely complete the head.
+        # Everything the final post acts on, as one value. Nothing reaches the
+        # host until post_review succeeds, so an interruption before it cannot
+        # remotely complete the head. A gateway reads what it supports.
         complete = INCOMPLETE_MARKER not in summary
-        if isinstance(github, SupportsCompletionMark):
-            github.mark_reviewed(ctx.head_sha if complete else None)
-        if isinstance(github, SupportsDiffFingerprint):
+        submission = ReviewSubmission(
+            findings=findings,
+            summary=summary,
+            # The FULL PR diff (already fetched), so the commentable-line index
+            # is built from the diff the comments will anchor to — the
+            # incremental diff's context lines aren't necessarily in the PR diff.
+            diff=ctx.diff,
+            # The watermark, and the gate for resolve-on-fix: a partial run
+            # completes nothing and resolves nothing.
+            completed_sha=ctx.head_sha if complete else None,
             # The WHOLE pull request's diff, never the increment: the next run
             # compares it against its own whole diff (see _incremental_context).
-            github.mark_reviewed_diff(diff_fingerprint(ctx.diff) if complete else None)
-        if incremental_since is not None and isinstance(github, SupportsIncremental):
-            # Resolve-on-fix may only touch threads on files this run
-            # actually re-reviewed — absence elsewhere proves nothing.
-            github.set_incremental_scope(_diff_paths(review_ctx.diff))
+            diff_fingerprint=diff_fingerprint(ctx.diff) if complete else None,
+            # Resolve-on-fix may only touch threads on files this run actually
+            # re-reviewed — absence elsewhere proves nothing.
+            incremental_scope=(
+                frozenset(_diff_paths(review_ctx.diff)) if incremental_since is not None else None
+            ),
+            validated_fixed_threads=validated_fixed,
+        )
         # Make an incomplete run visible. On a re-run post_review can only PUT
         # the summary onto the review the FIRST run created — a silent edit of an
         # older comment that notifies nobody, while this run's new findings post
@@ -215,12 +233,8 @@ def run_review(
         # pull_request_review_comment events, so a consumer whose concurrency
         # group isn't discriminated by event name can have the resulting run
         # cancel this one. Nothing may follow that we would lose.
-        #
-        # Pass the FULL PR diff (already fetched) so the commentable-line
-        # index is built from the diff the comments will anchor to — the
-        # incremental diff's context lines aren't necessarily in the PR diff.
         with profiler.stage("post"):
-            github.post_review(findings, summary, diff=ctx.diff)
+            github.post_review(submission)
         if diagram_required and complete:
             if provider is None:
                 raise ValueError("a provider is required for automatic diagram completion")
@@ -329,20 +343,21 @@ def _validate_prior_findings(
     cfg: ReviewConfig,
     ctx: PRContext,
     current_findings: list[ReviewFinding],
-) -> str:
-    """Validate active prior findings and install the explicit resolve allowlist."""
+) -> tuple[str, frozenset[str] | None]:
+    """Validate active prior findings; return the summary line and resolve allowlist.
+
+    The allowlist is None when the gateway cannot resolve threads at all, and
+    empty when validation could not run, so every thread stays open.
+    """
     if not isinstance(github, SupportsThreadResolution):
-        return ""
-    set_fixed = github.set_validated_fixed_threads
+        return "", None
     try:
         active = github.list_active_findings()
     except Exception as exc:  # noqa: BLE001 - failure leaves every thread open
         _log.warning("reading active findings for validation failed: %s", exc)
-        set_fixed(set())
-        return "_Follow-up validation was unavailable; earlier findings remain open._"
+        return "_Follow-up validation was unavailable; earlier findings remain open._", frozenset()
     if not active:
-        set_fixed(set())
-        return ""
+        return "", frozenset()
 
     from lgtmaybe.core.models import FindingValidation, FindingValidationStatus
     from lgtmaybe.engine.validate import validate_findings
@@ -388,16 +403,15 @@ def _validate_prior_findings(
         for verdict in verdicts
     ]
 
-    fixed = {
+    fixed = frozenset(
         verdict.thread_id for verdict in verdicts if verdict.status is FindingValidationStatus.fixed
-    }
-    set_fixed(fixed)
+    )
     counts = Counter(verdict.status for verdict in verdicts)
     return (
         f"_Follow-up validation: {counts[FindingValidationStatus.fixed]} fixed, "
         f"{counts[FindingValidationStatus.still_open]} still open, "
         f"{counts[FindingValidationStatus.uncertain]} uncertain._"
-    )
+    ), fixed
 
 
 def fail_on_check(findings: list[ReviewFinding], fail_on: Severity) -> tuple[str, str, str]:

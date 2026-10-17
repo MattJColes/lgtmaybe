@@ -184,7 +184,7 @@ def test_total_failure_notice_posts_even_when_the_review_body_update_fails() -> 
     """
 
     class _ReviewPostFails(FakeGitHub):
-        def post_review(self, findings, summary, diff=None):  # type: ignore[override]
+        def post_review(self, submission):  # type: ignore[override]
             raise RuntimeError("422 from the reviews endpoint")
 
     github = _ReviewPostFails(_CTX)

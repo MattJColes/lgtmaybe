@@ -49,7 +49,7 @@ github.incremental:
     files: [src/lgtmaybe/github/**/*.py]
   - rule:
       kind: function_definition
-      has: { field: name, regex: '^mark_reviewed$' }
+      has: { field: name, regex: '^last_reviewed_sha$' }
     files: [src/lgtmaybe/github/**/*.py]
   - rule:
       kind: function_definition

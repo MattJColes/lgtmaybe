@@ -15,6 +15,7 @@ import respx
 
 from lgtmaybe.core.models import ReviewFinding, Severity
 from lgtmaybe.gitlab import GitLabGateway
+from tests.fakes import submission
 
 HOST = "gitlab.example.com"
 REPO = "group/sub/project"
@@ -151,7 +152,7 @@ class TestDiscussionFetching:
         gateway = _gateway()
 
         gateway.get_pr_context()  # counts open finding threads
-        gateway.post_review([FINDING], "summary")  # reads them again to de-dupe
+        gateway.post_review(submission([FINDING], "summary"))  # reads them again to de-dupe
 
         assert listed.call_count == 1
 
@@ -174,7 +175,7 @@ class TestPostReview:
         gateway = _gateway()
 
         ctx = gateway.get_pr_context()
-        gateway.post_review([FINDING], "1 finding", diff=ctx.diff)
+        gateway.post_review(submission([FINDING], "1 finding", diff=ctx.diff))
 
         position = json.loads(created.calls[0].request.content)["position"]
         assert position["old_path"] == "old.py"
@@ -188,7 +189,7 @@ class TestPostReview:
         )
         gateway = _gateway()
 
-        gateway.post_review([], "summary", diff=DIFF)
+        gateway.post_review(submission([], "summary", diff=DIFF))
         gateway.post_describe_comment("description")
         gateway.post_diagram_comment("diagram")
 
@@ -212,10 +213,9 @@ class TestPostReview:
         edit = respx.put(f"{MR_URL}/notes/1").mock(return_value=httpx.Response(200, json={}))
         gateway = _gateway()
 
-        gateway.post_review([], "summary", diff=DIFF)
-        gateway.mark_reviewed(None)  # what _post_notice does before re-reading
+        gateway.post_review(submission([], "summary", diff=DIFF))
         assert gateway.last_reviewed_sha() is None
-        gateway.post_review([], "review failed", diff=DIFF)
+        gateway.post_review(submission([], "review failed", diff=DIFF))
 
         assert create.call_count == 1
         assert edit.called
@@ -248,9 +248,8 @@ class TestPostReview:
         )
         gateway = _gateway()
 
-        gateway.post_review([], "summary", diff=DIFF)
-        gateway.mark_reviewed(None)
-        gateway.post_review([], "review failed", diff=DIFF)
+        gateway.post_review(submission([], "summary", diff=DIFF))
+        gateway.post_review(submission([], "review failed", diff=DIFF))
 
         assert create.call_count == 2
         assert not edit.called
@@ -265,7 +264,7 @@ class TestPostReview:
         )
         gateway = _gateway()
         gateway._diff_refs = MR_DETAIL["diff_refs"]
-        gateway.post_review([FINDING], "1 finding", diff=DIFF)
+        gateway.post_review(submission([FINDING], "1 finding", diff=DIFF))
 
         assert created.called
         payload = json.loads(created.calls[0].request.content)
@@ -286,9 +285,11 @@ class TestPostReview:
         gateway = _gateway()
         gateway._diff_refs = MR_DETAIL["diff_refs"]
         gateway.post_review(
-            [FINDING.model_copy(update={"side": "LEFT", "line": 1, "anchor": "import os"})],
-            "1 finding",
-            diff=DIFF,
+            submission(
+                [FINDING.model_copy(update={"side": "LEFT", "line": 1, "anchor": "import os"})],
+                "1 finding",
+                diff=DIFF,
+            )
         )
 
         position = json.loads(created.calls[0].request.content)["position"]
@@ -312,7 +313,7 @@ class TestPostReview:
         edit = respx.put(f"{MR_URL}/notes/55").mock(return_value=httpx.Response(200, json={}))
         create = respx.post(f"{MR_URL}/notes").mock(return_value=httpx.Response(201, json={}))
 
-        _gateway().post_review([], "👍 LGTM!", diff=DIFF)
+        _gateway().post_review(submission([], "👍 LGTM!", diff=DIFF))
 
         assert edit.called
         assert not create.called
@@ -328,7 +329,9 @@ class TestPostReview:
         )
         create = respx.post(f"{MR_URL}/notes").mock(return_value=httpx.Response(201, json={}))
 
-        _gateway().post_review([], "0 findings · risk high\n<!-- lgtmaybe-risk:high -->", diff=DIFF)
+        _gateway().post_review(
+            submission([], "0 findings · risk high\n<!-- lgtmaybe-risk:high -->", diff=DIFF)
+        )
 
         assert "<!-- lgtmaybe-risk:high -->" in json.loads(create.calls[0].request.content)["body"]
 
@@ -366,7 +369,7 @@ class TestPostReview:
 
         gateway = _gateway()
         gateway._diff_refs = MR_DETAIL["diff_refs"]
-        gateway.post_review([FINDING], "1 finding", diff=DIFF)
+        gateway.post_review(submission([FINDING], "1 finding", diff=DIFF))
 
         assert not created.called
 
@@ -405,7 +408,7 @@ class TestPostReview:
         gateway = _gateway()
         gateway._diff_refs = MR_DETAIL["diff_refs"]
 
-        gateway.post_review(findings, "2 findings", diff=duplicate_diff)
+        gateway.post_review(submission(findings, "2 findings", diff=duplicate_diff))
 
         assert created.call_count == 1
 
@@ -442,7 +445,7 @@ class TestPostReview:
 
         gateway = _gateway()
         gateway._diff_refs = MR_DETAIL["diff_refs"]
-        gateway.post_review([FINDING], "1 finding", diff=DIFF)
+        gateway.post_review(submission([FINDING], "1 finding", diff=DIFF))
 
         assert created.called
 
@@ -457,7 +460,11 @@ class TestPostReview:
         gateway = _gateway()
         gateway._diff_refs = MR_DETAIL["diff_refs"]
         gateway.post_review(
-            [FINDING.model_copy(update={"line": 999, "anchored": False})], "1 finding", diff=DIFF
+            submission(
+                [FINDING.model_copy(update={"line": 999, "anchored": False})],
+                "1 finding",
+                diff=DIFF,
+            )
         )
 
         body = json.loads(create.calls[0].request.content)["body"]
@@ -543,8 +550,15 @@ class TestThreadResolution:
         gateway = _gateway()
         gateway._diff_refs = MR_DETAIL["diff_refs"]
         gateway.list_active_findings()
-        gateway.set_validated_fixed_threads({"thread-1"})
-        gateway.post_review([], "👍 LGTM!", diff=DIFF)
+        gateway.post_review(
+            submission(
+                [],
+                "👍 LGTM!",
+                diff=DIFF,
+                completed_sha="head456",
+                validated_fixed_threads={"thread-1"},
+            )
+        )
 
         assert reply.called, "a resolved finding is explained before it is closed"
         assert resolve.called
@@ -566,8 +580,7 @@ class TestThreadResolution:
         gateway = _gateway()
         gateway._diff_refs = MR_DETAIL["diff_refs"]
         gateway.list_active_findings()
-        gateway.set_validated_fixed_threads(set())
-        gateway.post_review([], "👍 LGTM!", diff=DIFF)
+        gateway.post_review(submission([], "👍 LGTM!", diff=DIFF, validated_fixed_threads=set()))
 
         assert not resolve.called
 
@@ -636,7 +649,7 @@ class TestAuthorship:
 
         gateway = _gateway()
         gateway._diff_refs = MR_DETAIL["diff_refs"]
-        gateway.post_review([FINDING], "1 finding", diff=DIFF)
+        gateway.post_review(submission([FINDING], "1 finding", diff=DIFF))
 
         assert created.called, "a stranger's copy of our id must not suppress the finding"
 
@@ -671,7 +684,7 @@ class TestAuthorship:
         theirs = respx.put(f"{MR_URL}/notes/99").mock(return_value=httpx.Response(403, json={}))
         ours = respx.put(f"{MR_URL}/notes/55").mock(return_value=httpx.Response(200, json={}))
 
-        _gateway().post_review([], "👍 LGTM!", diff=DIFF)
+        _gateway().post_review(submission([], "👍 LGTM!", diff=DIFF))
 
         assert not theirs.called, "their note is not ours to edit"
         assert ours.called, "our own summary is still edited in place"
@@ -701,7 +714,7 @@ class TestAuthorship:
 
         gateway = _gateway()
         gateway._diff_refs = MR_DETAIL["diff_refs"]
-        gateway.post_review([FINDING], "1 finding", diff=DIFF)
+        gateway.post_review(submission([FINDING], "1 finding", diff=DIFF))
 
         assert created.called, "a duplicate is better than a hidden finding"
         assert create.called and not edit.called, "never edit a note we can't prove is ours"
@@ -725,7 +738,7 @@ class TestAuthorship:
         gateway = _gateway()
 
         gateway.count_open_finding_threads()
-        gateway.post_review([], "👍 LGTM!", diff=DIFF)
+        gateway.post_review(submission([], "👍 LGTM!", diff=DIFF))
 
         assert len(lookups) == 1
 
@@ -840,7 +853,7 @@ class TestResilience:
 
         gateway = _gateway()
         gateway._diff_refs = MR_DETAIL["diff_refs"]
-        gateway.post_review([FINDING], "1 finding", diff=DIFF)  # must not raise
+        gateway.post_review(submission([FINDING], "1 finding", diff=DIFF))  # must not raise
 
         assert note.called, "the summary still posts"
         body = json.loads(note.calls[0].request.content)["body"]
@@ -855,7 +868,7 @@ class TestResilience:
         )
         note = respx.post(f"{MR_URL}/notes").mock(return_value=httpx.Response(201, json={}))
 
-        _gateway().post_review([FINDING], "1 finding", diff=DIFF)
+        _gateway().post_review(submission([FINDING], "1 finding", diff=DIFF))
 
         assert not created.called
         assert "Hardcoded password" in json.loads(note.calls[0].request.content)["body"]
@@ -901,8 +914,11 @@ class TestResolveFixedIsHonoured:
             resolve_fixed=resolve_fixed,
         )
         gateway.list_active_findings()
-        gateway.set_validated_fixed_threads({"thread-1"})
-        gateway.post_review([], "👍 LGTM!")
+        gateway.post_review(
+            submission(
+                [], "👍 LGTM!", completed_sha="head456", validated_fixed_threads={"thread-1"}
+            )
+        )
         return resolve
 
     @respx.mock
@@ -973,7 +989,7 @@ class TestForgedFindingIds:
 
         gateway = _gateway()
         gateway._diff_refs = MR_DETAIL["diff_refs"]
-        gateway.post_review([FINDING], "1 finding", diff=DIFF)
+        gateway.post_review(submission([FINDING], "1 finding", diff=DIFF))
 
         assert created.called, "the forged id suppressed a finding never posted"
 

@@ -11,7 +11,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-from .models import ActiveFinding, PRContext, ProviderResult, ReviewConfig, ReviewFinding
+from .models import (
+    ActiveFinding,
+    PRContext,
+    ProviderResult,
+    ReviewConfig,
+    ReviewFinding,
+    ReviewSubmission,
+)
 
 # A chat message in the provider-neutral shape litellm expects.
 Message = dict[str, str]
@@ -146,14 +153,15 @@ class ReviewGateway(Protocol):
         """Fetch the PR diff and metadata via API (never check out PR code)."""
         ...
 
-    def post_review(
-        self, findings: list[ReviewFinding], summary: str, diff: str | None = None
-    ) -> None:
+    def post_review(self, submission: ReviewSubmission) -> None:
         """Post batched inline comments + one summary, idempotently.
 
-        ``diff`` is the already-fetched PR diff used to map findings to inline
-        positions; when omitted the adapter re-fetches it. Callers that already
-        hold the context should pass it to avoid a redundant round-trip.
+        Everything the post acts on rides ``submission``: the findings and
+        summary, the PR diff they anchor to (None: the adapter re-fetches it),
+        the completed head (None: stamp nothing, resolve nothing), the diff
+        fingerprint, the incremental scope and the validated-fixed allowlist.
+        An adapter reads the fields its host supports and ignores the rest, and
+        keeps none of them after the call.
         """
         ...
 
@@ -223,27 +231,12 @@ class SupportsConversation(Protocol):
 
 
 @runtime_checkable
-class SupportsCompletionMark(Protocol):
-    """Hear whether this run reviewed the head completely, before it posts.
-
-    Split from ``SupportsIncremental`` (issue #832): Gitea and Azure DevOps
-    take the stamp as the gate for resolve-on-fix — a partial run or a failure
-    notice is missing findings, not reporting them fixed — without offering
-    incremental review. On an incremental gateway it is also the watermark.
-    """
-
-    def mark_reviewed(self, head_sha: str | None) -> None:
-        """Stamp ``head_sha`` as reviewed (success path only); None clears it."""
-        ...
-
-
-@runtime_checkable
-class SupportsIncremental(SupportsCompletionMark, Protocol):
+class SupportsIncremental(Protocol):
     """Review only the commits pushed since the last successful review.
 
     Requires somewhere durable to stamp a watermark (in practice an editable
-    bot comment, written through the inherited ``mark_reviewed``) and an API
-    for the diff between two commits.
+    bot comment, written by ``post_review`` from ``ReviewSubmission.completed_sha``)
+    and an API for the diff between two commits.
     """
 
     def last_reviewed_sha(self) -> str | None:
@@ -258,10 +251,6 @@ class SupportsIncremental(SupportsCompletionMark, Protocol):
         """Unified diff between two commits, or None when not comparable."""
         ...
 
-    def set_incremental_scope(self, paths: set[str] | None) -> None:
-        """Limit resolve-on-fix to the files this increment re-reviewed."""
-        ...
-
 
 @runtime_checkable
 class SupportsDiffFingerprint(SupportsIncremental, Protocol):
@@ -270,15 +259,12 @@ class SupportsDiffFingerprint(SupportsIncremental, Protocol):
     A new head whose diff fingerprints the same as the reviewed one (a rebase
     that only moved a stacked pull request onto its merged parent) then has
     nothing new to review. A refinement of incremental review: the fingerprint
-    is only compared against the head ``last_reviewed_sha`` names.
+    is only compared against the head ``last_reviewed_sha`` names. It is
+    written from ``ReviewSubmission.diff_fingerprint``.
     """
 
     def last_reviewed_diff(self) -> str | None:
         """The fingerprint stamped with ``last_reviewed_sha``, or None."""
-        ...
-
-    def mark_reviewed_diff(self, fingerprint: str | None) -> None:
-        """Stamp the whole diff's fingerprint (success path only); None clears it."""
         ...
 
 
@@ -298,14 +284,14 @@ class SupportsScanManifests(Protocol):
 
 @runtime_checkable
 class SupportsThreadResolution(Protocol):
-    """Reply in, and resolve, the conversations opened by earlier findings."""
+    """Reply in, and resolve, the conversations opened by earlier findings.
+
+    The caller nominates which threads to resolve through
+    ``ReviewSubmission.validated_fixed_threads``.
+    """
 
     def list_active_findings(self) -> list[ActiveFinding]:
         """Open finding conversations, keyed by their hidden ids."""
-        ...
-
-    def set_validated_fixed_threads(self, thread_ids: set[str]) -> None:
-        """Nominate the threads confirmed fixed and safe to resolve."""
         ...
 
     def reply_in_thread(self, thread_id: str, body: str) -> None:

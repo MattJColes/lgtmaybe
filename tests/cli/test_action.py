@@ -365,9 +365,9 @@ class TestActionRouting:
                 super().__init__()
                 self.writes: list[str] = []
 
-            def post_review(self, findings, summary, diff=None):
+            def post_review(self, submission):
                 self.writes.append("review")
-                super().post_review(findings, summary, diff)
+                super().post_review(submission)
 
             def post_describe_comment(self, body: str) -> None:
                 self.writes.append("describe")

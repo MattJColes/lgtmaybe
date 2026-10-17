@@ -242,7 +242,6 @@ def test_a_partial_run_keeps_the_old_watermark() -> None:
 def test_a_failure_notice_never_moves_the_watermark() -> None:
     routes = _stub_mr()
     gateway = _gateway()
-    gateway.mark_reviewed(HEAD)  # run_review prepared it before the post failed
 
     _post_failure(gateway, RuntimeError("boom"))
 

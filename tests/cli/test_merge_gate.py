@@ -12,6 +12,7 @@ from lgtmaybe.core.models import (
     PRContext,
     ReviewConfig,
     ReviewFinding,
+    ReviewSubmission,
     Severity,
 )
 from lgtmaybe.review import run_review
@@ -102,8 +103,8 @@ class _PortOnlyGateway:
     def get_pr_context(self) -> PRContext:
         return self._ctx
 
-    def post_review(self, findings, summary, diff=None) -> None:
-        self.posted.append((findings, summary))
+    def post_review(self, submission: ReviewSubmission) -> None:
+        self.posted.append((submission.findings, submission.summary))
 
     def post_issue_comment(self, body: str) -> None:  # pragma: no cover - unused
         pass

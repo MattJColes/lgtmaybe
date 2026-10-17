@@ -19,6 +19,7 @@ from lgtmaybe.core.models import (
     ProviderResult,
     ReviewConfig,
     ReviewFinding,
+    ReviewSubmission,
     Severity,
 )
 from lgtmaybe.review import run_review
@@ -59,7 +60,11 @@ class RecordingEngine:
 
 
 class IncrementalFakeGitHub(FakeGitHub):
-    """FakeGitHub with the incremental adapter methods, recording calls."""
+    """FakeGitHub with the incremental adapter methods, recording calls.
+
+    ``marked_reviewed`` and ``scopes`` read the completed head and incremental
+    scope off each posted submission (they were setter calls before #833).
+    """
 
     def __init__(
         self,
@@ -88,11 +93,11 @@ class IncrementalFakeGitHub(FakeGitHub):
         self.compare_calls.append((base_sha, head_sha))
         return self._compare_result
 
-    def mark_reviewed(self, head_sha: str | None) -> None:
-        self.marked_reviewed.append(head_sha)
-
-    def set_incremental_scope(self, paths: set[str] | None) -> None:
-        self.scopes.append(paths)
+    def post_review(self, submission: ReviewSubmission) -> None:
+        self.marked_reviewed.append(submission.completed_sha)
+        if submission.incremental_scope is not None:
+            self.scopes.append(set(submission.incremental_scope))
+        super().post_review(submission)
 
     def count_open_finding_threads(self) -> int:
         # Completes SupportsThreadResolution (with FakeGitHub.reply_in_thread)
@@ -103,28 +108,21 @@ class IncrementalFakeGitHub(FakeGitHub):
 def test_a_partial_incremental_gateway_gets_a_full_review() -> None:
     """The group is all-or-nothing: half of an incremental review is worse than none.
 
-    Without ``set_incremental_scope`` resolve-on-fix could not be scoped to the
-    increment, so the gateway is not incremental at all — not incremental with
-    every earlier thread up for resolution.
+    A watermark without a compare API cannot name an increment, so the gateway
+    is not incremental at all and the run reviews the whole change.
     """
 
     class PartialGitHub(FakeGitHub):
         def __init__(self) -> None:
             super().__init__(CTX)
-            self.compare_calls = 0
+            self.completed_reads = 0
 
         def last_reviewed_sha(self) -> str | None:
             return "head1111"
 
         def last_completed_sha(self, *, diagram_required: bool) -> str | None:
+            self.completed_reads += 1
             return "head1111"
-
-        def compare_diff(self, base_sha: str, head_sha: str) -> str | None:
-            self.compare_calls += 1
-            return INC_DIFF
-
-        def mark_reviewed(self, head_sha: str | None) -> None:
-            pass
 
     github = PartialGitHub()
     engine = RecordingEngine()
@@ -132,7 +130,7 @@ def test_a_partial_incremental_gateway_gets_a_full_review() -> None:
     run_review(github=github, engine=engine, cfg=make_cfg(incremental=True), dry_run=False)
 
     assert engine.reviewed_ctxs[0].diff == FULL_DIFF
-    assert github.compare_calls == 0
+    assert github.completed_reads == 0
 
 
 def test_incremental_reviews_only_the_increment() -> None:
@@ -241,16 +239,12 @@ def test_incremental_validates_prior_findings_and_allows_only_fixed_resolution()
     class HybridGitHub(IncrementalFakeGitHub):
         def __init__(self) -> None:
             super().__init__(CTX, last_sha="head1111", compare_result=INC_DIFF)
-            self.fixed_thread_ids: list[set[str]] = []
 
         def list_active_findings(self) -> list[ActiveFinding]:
             return [
                 ActiveFinding(thread_id="FIXED", path="src/app.py", body="old bug", outdated=True),
                 ActiveFinding(thread_id="OPEN", path="src/other.py", body="still broken"),
             ]
-
-        def set_validated_fixed_threads(self, thread_ids: set[str]) -> None:
-            self.fixed_thread_ids.append(thread_ids)
 
     provider = FakeProvider(
         result=ProviderResult(
@@ -275,7 +269,7 @@ def test_incremental_validates_prior_findings_and_allows_only_fixed_resolution()
     )
 
     assert findings == []
-    assert github.fixed_thread_ids == [{"FIXED"}]
+    assert [s.validated_fixed_threads for s in github.submissions] == [{"FIXED"}]
     assert "1 fixed" in summary
     assert "1 still open" in summary
 
@@ -284,13 +278,9 @@ def test_model_fixed_verdict_needs_an_outdated_thread() -> None:
     class HybridGitHub(IncrementalFakeGitHub):
         def __init__(self) -> None:
             super().__init__(CTX, last_sha="head1111", compare_result=INC_DIFF)
-            self.fixed_thread_ids: set[str] | None = None
 
         def list_active_findings(self) -> list[ActiveFinding]:
             return [ActiveFinding(thread_id="T1", path="src/app.py", body="old bug")]
-
-        def set_validated_fixed_threads(self, thread_ids: set[str]) -> None:
-            self.fixed_thread_ids = thread_ids
 
     provider = FakeProvider(
         result=ProviderResult(
@@ -309,7 +299,7 @@ def test_model_fixed_verdict_needs_an_outdated_thread() -> None:
         provider=provider,
     )
 
-    assert github.fixed_thread_ids == set()
+    assert [s.validated_fixed_threads for s in github.submissions] == [set()]
     assert "1 uncertain" in summary
 
 
@@ -317,13 +307,9 @@ def test_followup_validation_unavailable_resolves_nothing() -> None:
     class HybridGitHub(IncrementalFakeGitHub):
         def __init__(self) -> None:
             super().__init__(CTX, last_sha="head1111", compare_result=INC_DIFF)
-            self.fixed_thread_ids: set[str] | None = None
 
         def list_active_findings(self) -> list[ActiveFinding]:
             raise RuntimeError("GitHub lookup failed")
-
-        def set_validated_fixed_threads(self, thread_ids: set[str]) -> None:
-            self.fixed_thread_ids = thread_ids
 
     github = HybridGitHub()
 
@@ -335,7 +321,7 @@ def test_followup_validation_unavailable_resolves_nothing() -> None:
         provider=FakeProvider(),
     )
 
-    assert github.fixed_thread_ids == set()
+    assert [s.validated_fixed_threads for s in github.submissions] == [set()]
     assert "remain open" in summary
 
 
@@ -542,7 +528,7 @@ def test_run_diagram_falls_back_to_issue_comment_without_upsert() -> None:
                 pr_number=1,
             )
 
-        def post_review(self, findings, summary, diff=None) -> None:  # pragma: no cover - unused
+        def post_review(self, submission: ReviewSubmission) -> None:  # pragma: no cover - unused
             pass
 
         def post_issue_comment(self, body: str) -> None:
@@ -592,7 +578,7 @@ def test_required_diagram_fails_without_a_completion_aware_gateway() -> None:
                 pr_number=1,
             )
 
-        def post_review(self, findings, summary, diff=None) -> None:  # pragma: no cover
+        def post_review(self, submission: ReviewSubmission) -> None:  # pragma: no cover
             pass
 
         def post_issue_comment(self, body: str) -> None:  # pragma: no cover
@@ -635,7 +621,7 @@ def test_manual_diagram_fails_when_the_gateway_cannot_post() -> None:
                 pr_number=1,
             )
 
-        def post_review(self, findings, summary, diff=None) -> None:  # pragma: no cover
+        def post_review(self, submission: ReviewSubmission) -> None:  # pragma: no cover
             pass
 
         def post_issue_comment(self, body: str) -> None:
@@ -712,16 +698,12 @@ class FingerprintFakeGitHub(IncrementalFakeGitHub):
         super().__init__(ctx, **kwargs)  # type: ignore[arg-type]
         self._reviewed_sha = reviewed_sha
         self._reviewed_diff = reviewed_diff
-        self.marked_diffs: list[str | None] = []
 
     def last_reviewed_sha(self) -> str | None:
         return self._reviewed_sha
 
     def last_reviewed_diff(self) -> str | None:
         return self._reviewed_diff
-
-    def mark_reviewed_diff(self, fingerprint: str | None) -> None:
-        self.marked_diffs.append(fingerprint)
 
 
 def _rebased(diff: str) -> str:
@@ -801,4 +783,6 @@ def test_a_review_stamps_the_whole_pr_diff_fingerprint(complete: bool) -> None:
 
     run_review(github=github, engine=engine, cfg=make_cfg(incremental=True), dry_run=False)
 
-    assert github.marked_diffs == [diff_fingerprint(FULL_DIFF) if complete else None]
+    assert [s.diff_fingerprint for s in github.submissions] == [
+        diff_fingerprint(FULL_DIFF) if complete else None
+    ]

@@ -16,6 +16,7 @@ import respx
 
 from lgtmaybe.core.models import ReviewFinding, Severity
 from lgtmaybe.gitea import GiteaGateway
+from tests.fakes import submission
 
 HOST = "gitea.example.com"
 REPO = "owner/repo"
@@ -155,7 +156,7 @@ class TestPostReview:
             anchor='password = "hunter2"',
             anchored=True,
         )
-        _gateway(httpx.Client()).post_review([finding], "1 finding", diff=DIFF)
+        _gateway(httpx.Client()).post_review(submission([finding], "1 finding", diff=DIFF))
 
         assert reviews.called
         posted = reviews.calls[0].request
@@ -190,7 +191,7 @@ class TestPostReview:
             anchor="import os",
             anchored=True,
         )
-        _gateway(httpx.Client()).post_review([finding], "1 finding", diff=DIFF)
+        _gateway(httpx.Client()).post_review(submission([finding], "1 finding", diff=DIFF))
 
         import json as _json
 
@@ -212,7 +213,7 @@ class TestPostReview:
         )
 
         summary = "0 findings · risk high\n<!-- lgtmaybe-risk:high -->"
-        _gateway(httpx.Client()).post_review([], summary, diff=DIFF)
+        _gateway(httpx.Client()).post_review(submission([], summary, diff=DIFF))
 
         import json as _json
 
@@ -243,7 +244,7 @@ class TestPostReview:
             return_value=httpx.Response(201, json={"id": 100})
         )
 
-        _gateway(httpx.Client()).post_review([], "👍 LGTM!", diff=DIFF)
+        _gateway(httpx.Client()).post_review(submission([], "👍 LGTM!", diff=DIFF))
 
         assert edit.called, "an existing summary must be edited"
         assert not create.called, "and not duplicated"
@@ -285,7 +286,7 @@ class TestPostReview:
         )
         reviews = respx.post(f"{PR_URL}/reviews").mock(return_value=httpx.Response(200, json={}))
 
-        _gateway(httpx.Client()).post_review([finding], "1 finding", diff=DIFF)
+        _gateway(httpx.Client()).post_review(submission([finding], "1 finding", diff=DIFF))
 
         assert not reviews.called, "the only finding was already on the PR"
         assert listed.call_count == 1
@@ -327,7 +328,9 @@ class TestPostReview:
             for line in (2, 3)
         ]
 
-        _gateway(httpx.Client()).post_review(findings, "2 findings", diff=duplicate_diff)
+        _gateway(httpx.Client()).post_review(
+            submission(findings, "2 findings", diff=duplicate_diff)
+        )
 
         assert reviews.call_count == 1
         assert len(json.loads(reviews.calls[0].request.content)["comments"]) == 1
@@ -372,7 +375,7 @@ class TestPostReview:
         )
         reviews = respx.post(f"{PR_URL}/reviews").mock(return_value=httpx.Response(200, json={}))
 
-        _gateway(httpx.Client()).post_review([finding], "1 finding", diff=DIFF)
+        _gateway(httpx.Client()).post_review(submission([finding], "1 finding", diff=DIFF))
 
         assert not reviews.called, "the only finding was already on the PR"
 
@@ -399,7 +402,7 @@ class TestPostReview:
             body="Could not be anchored.",
             anchored=False,
         )
-        _gateway(httpx.Client()).post_review([finding], "1 finding", diff=DIFF)
+        _gateway(httpx.Client()).post_review(submission([finding], "1 finding", diff=DIFF))
 
         import json as _json
 
@@ -481,7 +484,9 @@ class TestAuthorship:
         )
         reviews = respx.post(f"{PR_URL}/reviews").mock(return_value=httpx.Response(200, json={}))
 
-        _gateway(httpx.Client()).post_review([finding], "1 finding", diff=_COMMAND_INJECTION_DIFF)
+        _gateway(httpx.Client()).post_review(
+            submission([finding], "1 finding", diff=_COMMAND_INJECTION_DIFF)
+        )
 
         assert reviews.called, "a stranger's copy of our id must not suppress the finding"
         posted = json.loads(reviews.calls[0].request.content)["comments"]
@@ -505,7 +510,7 @@ class TestAuthorship:
             return_value=httpx.Response(200, json={})
         )
 
-        _gateway(httpx.Client()).post_review([], "👍 LGTM!", diff=DIFF)
+        _gateway(httpx.Client()).post_review(submission([], "👍 LGTM!", diff=DIFF))
 
         assert not theirs.called, "their comment is not ours to edit"
         assert ours.called, "our own summary is still edited in place"
@@ -546,7 +551,9 @@ class TestAuthorship:
         )
         reviews = respx.post(f"{PR_URL}/reviews").mock(return_value=httpx.Response(200, json={}))
 
-        _gateway(httpx.Client()).post_review([finding], "1 finding", diff=_COMMAND_INJECTION_DIFF)
+        _gateway(httpx.Client()).post_review(
+            submission([finding], "1 finding", diff=_COMMAND_INJECTION_DIFF)
+        )
 
         assert reviews.called, "a duplicate is better than a hidden finding"
         assert create.called and not edit.called, "never edit a comment we can't prove is ours"
@@ -573,7 +580,7 @@ class TestAuthorship:
         )
         gateway = _gateway(httpx.Client())
 
-        gateway.post_review([], "👍 LGTM!", diff=DIFF)
+        gateway.post_review(submission([], "👍 LGTM!", diff=DIFF))
         gateway.post_describe_comment("description")
 
         assert summary.called and describe.called
@@ -820,7 +827,7 @@ class TestForgedFindingIds:
         )
         reviews = respx.post(f"{PR_URL}/reviews").mock(return_value=httpx.Response(200, json={}))
 
-        _gateway(httpx.Client()).post_review([finding], "1 finding", diff=DIFF)
+        _gateway(httpx.Client()).post_review(submission([finding], "1 finding", diff=DIFF))
 
         assert reviews.called, "the forged id suppressed a finding never posted"
         posted = json.loads(reviews.calls[0].request.content)["comments"]
@@ -913,8 +920,9 @@ class TestResolveOnFix:
             host=HOST, repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client(), **kwargs
         )
         ctx = gateway.get_pr_context()
-        gateway.mark_reviewed(ctx.head_sha)
-        gateway.post_review(findings or [], "👍 LGTM!", diff=DIFF)
+        gateway.post_review(
+            submission(findings or [], "👍 LGTM!", diff=DIFF, completed_sha=ctx.head_sha)
+        )
         return gateway
 
     @staticmethod
@@ -965,16 +973,13 @@ class TestResolveOnFix:
         assert resolve.call_count == 1
 
     @respx.mock
-    @pytest.mark.parametrize("reviewed", ["unmarked", None])
-    def test_an_incomplete_run_resolves_nothing(self, reviewed: str | None) -> None:
+    def test_an_incomplete_run_resolves_nothing(self) -> None:
         """A partial run or failure notice is missing findings, not reporting them fixed."""
         resolve = self._stub(head_text=self.FIXED)
         gateway = _gateway(httpx.Client())
         gateway.get_pr_context()
-        if reviewed is None:
-            gateway.mark_reviewed(None)
 
-        gateway.post_review([], "partial", diff=DIFF)
+        gateway.post_review(submission([], "partial", diff=DIFF))
 
         assert not resolve.called
 
@@ -1090,8 +1095,6 @@ class TestResolveOnFix:
         located = PRLocator(forge=Forge.gitea, host=HOST, repo=REPO, number=PR_NUMBER)
         gateway = _GATEWAY_BUILDERS[Forge.gitea](located, TOKEN, cfg)
         ctx = gateway.get_pr_context()
-        gateway.mark_reviewed(ctx.head_sha)  # type: ignore[attr-defined]
-
-        gateway.post_review([], "👍 LGTM!", diff=DIFF)
+        gateway.post_review(submission([], "👍 LGTM!", diff=DIFF, completed_sha=ctx.head_sha))
 
         assert not resolve.called

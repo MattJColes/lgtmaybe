@@ -59,7 +59,7 @@ from lgtmaybe.core.diff import (
 from lgtmaybe.core.diffbuild import has_unsafe_path_chars, patch_from_hunks
 from lgtmaybe.core.diffparse import parse_hunk_header, walk_diff
 from lgtmaybe.core.logging import get_logger
-from lgtmaybe.core.models import ActiveFinding, PRContext, ReviewFinding
+from lgtmaybe.core.models import ActiveFinding, PRContext, ReviewFinding, ReviewSubmission
 from lgtmaybe.core.paginate import paginate_pages
 
 _log = get_logger(__name__)
@@ -136,19 +136,13 @@ class GitLabGateway:
         self._diff_refs: dict[str, str] | None = None
         self._old_paths: dict[str, str] = {}
         self._scan_manifests = False
+        # Read cache of list_active_findings: the paths an incremental
+        # submission's scope is checked against.
         self._active_findings: list[ActiveFinding] | None = None
-        self._validated_fixed_thread_ids: set[str] | None = None
         # The MR's discussion list, read by three callers per run and never
         # mutated between them (see `_discussions`).
         self._discussions_cache: list[dict[str, Any]] | None = None
         self._notes_cache: list[dict[str, Any]] | None = None
-        # Head SHA this run completed, set by the orchestrator on the success
-        # path only. Never inferred inside post_review: a failure notice posts
-        # through the same method and must not claim the head was reviewed.
-        self._reviewed_sha: str | None = None
-        # Files this incremental run re-reviewed; resolve-on-fix stays inside
-        # them. None means a full review, so no restriction.
-        self._incremental_paths: set[str] | None = None
         # The token's own user id. A watermark is only believed from a note this
         # identity wrote: anyone can post a note carrying our marker.
         self._posting_user_id: int | None = None
@@ -225,19 +219,14 @@ class GitLabGateway:
             open_finding_threads=self.count_open_finding_threads(),
         )
 
-    def post_review(
-        self,
-        findings: list[ReviewFinding],
-        summary: str,
-        diff: str | None = None,
-    ) -> None:
+    def post_review(self, submission: ReviewSubmission) -> None:
         """Post each finding as its own discussion, then upsert the summary note.
 
         Findings already carrying one of our hidden ids on the MR are skipped, so
         a re-run adds only what is new. Threads the caller validated as fixed are
         replied to and resolved afterwards — never before, so a failure part-way
         through leaves the record honest rather than closing a finding that was
-        never re-stated.
+        never re-stated — and only when the submission names a completed head.
 
         The summary note carries the incremental-review watermark, under three
         rules:
@@ -245,14 +234,15 @@ class GitLabGateway:
         - Any ``REVIEWED_MARKER`` watermark already in the summary or the
           demoted/broad findings is stripped. That text includes model prose,
           and a forged marker there must never become the watermark.
-        - A new ``reviewed_marker(sha)`` is appended only when the
-          orchestrator called ``mark_reviewed(sha)`` on the success path. A
-          failure notice or partial run calls ``mark_reviewed(None)`` and can
-          never stamp the new head.
+        - A new ``reviewed_marker(sha)`` is appended only from the
+          submission's ``completed_sha``, which the orchestrator sets on the
+          success path only. A failure notice or partial run carries None and
+          can never stamp the new head.
         - An unmarked post carries forward the watermark already on the note it
           edits. The note is edited in place, so leaving it out would erase the
           record of commits that were reviewed; carrying it never moves it.
         """
+        findings, summary, diff = submission.findings, submission.summary, submission.diff
         if diff is None and findings:
             diff = self._fetch_mr_diff()
 
@@ -276,12 +266,12 @@ class GitLabGateway:
         # The note is edited in place, so an unmarked post (a failure notice, a
         # partial run) keeps the head the last successful run recorded instead
         # of erasing it: those commits were reviewed, and nothing since was.
-        watermark = self._reviewed_sha or self._carried_marker(self._marker, REVIEWED_MARKER)
+        watermark = submission.completed_sha or self._carried_marker(self._marker, REVIEWED_MARKER)
         if watermark:
             body += f"\n{reviewed_marker(watermark)}"
         self._upsert_note(body, self._marker)
         if self._resolve_fixed:
-            self._resolve_fixed_threads()
+            self._resolve_fixed_threads(submission)
 
     def post_issue_comment(self, body: str) -> None:
         """Post a standalone note to the merge request conversation."""
@@ -395,22 +385,6 @@ class GitLabGateway:
             return None
         return _unified_diff(comparison["diffs"])
 
-    def mark_reviewed(self, head_sha: str | None) -> None:
-        """Prepare the watermark for the next summary post (success path only).
-
-        In-memory until ``post_review`` writes it. The CLI's failure path calls
-        ``mark_reviewed(None)`` so a failure notice never records the new head.
-        """
-        self._reviewed_sha = head_sha
-
-    def set_incremental_scope(self, paths: set[str] | None) -> None:
-        """Restrict resolve-on-fix to discussions on ``paths`` (None = no limit).
-
-        A finding on a file this increment did not touch is missing from the
-        run's findings only because nobody looked, so its thread stays open.
-        """
-        self._incremental_paths = paths
-
     def list_active_findings(self) -> list[ActiveFinding]:
         """Our own unresolved finding discussions, keyed by their hidden ids."""
         active: list[ActiveFinding] = []
@@ -441,10 +415,6 @@ class GitLabGateway:
             )
         self._active_findings = active
         return active
-
-    def set_validated_fixed_threads(self, thread_ids: set[str]) -> None:
-        """Install the allowlist of threads confirmed fixed and safe to resolve."""
-        self._validated_fixed_thread_ids = set(thread_ids)
 
     def reply_in_thread(self, thread_id: str, body: str) -> None:
         """Reply to one existing discussion."""
@@ -616,21 +586,32 @@ class GitLabGateway:
             _log.warning("posting discussion at %s failed: %s", position.get("new_path"), exc)
             return False
 
-    def _resolve_fixed_threads(self) -> None:
+    def _resolve_fixed_threads(self, submission: ReviewSubmission) -> None:
         """Reply in, then resolve, every thread the caller validated as fixed.
 
-        Gated on the allowlist being installed: with no validation step there is
-        no evidence a finding was fixed, and silently closing it would be worse
-        than leaving it open.
+        Gated on a non-empty allowlist: with no validation step there is no
+        evidence a finding was fixed, and silently closing it would be worse
+        than leaving it open. Gated, too, on a completed head: a partial run or
+        a failure notice is missing findings, not reporting them fixed.
         """
-        if not self._validated_fixed_thread_ids:
+        if submission.completed_sha is None or not submission.validated_fixed_threads:
             return
-        thread_ids = set(self._validated_fixed_thread_ids)
-        if self._incremental_paths is not None:
+        thread_ids = set(submission.validated_fixed_threads)
+        scope = submission.incremental_scope
+        if scope is not None:
             # An incremental run validated against its own increment only: a
             # thread on any other file has no fresh evidence behind it.
-            paths = {f.thread_id: f.path for f in self._active_findings or []}
-            thread_ids = {t for t in thread_ids if paths.get(t) in self._incremental_paths}
+            try:
+                active = (
+                    self._active_findings
+                    if self._active_findings is not None
+                    else self.list_active_findings()
+                )
+            except Exception as exc:  # noqa: BLE001 — resolving never fails a review
+                _log.warning("reading finding discussions to resolve failed: %s", exc)
+                return
+            paths = {f.thread_id: f.path for f in active}
+            thread_ids = {t for t in thread_ids if paths.get(t) in scope}
         for thread_id in sorted(thread_ids):
             try:
                 self.reply_in_thread(thread_id, _RESOLVED_REPLY)

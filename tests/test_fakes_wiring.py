@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from lgtmaybe.core.models import Provider, ReviewConfig
+from tests.fakes import submission
 
 from .fakes import FakeEngine, FakeGitHub, FakeProvider
 
@@ -15,7 +16,7 @@ def test_end_to_end_on_fakes() -> None:
     ctx = github.get_pr_context()
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
     findings, summary = engine.review(ctx, cfg)
-    github.post_review(findings, summary)
+    github.post_review(submission(findings, summary))
 
     # provider was actually invoked with the diff
     assert provider.calls

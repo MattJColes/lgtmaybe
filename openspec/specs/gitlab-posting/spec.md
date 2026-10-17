@@ -73,8 +73,9 @@ by anyone else is ignored and, with no own note, a fresh one is posted.
 
 Resolve-on-fix SHALL reply in and then resolve only the discussions the caller
 has explicitly validated as fixed, via the discussion resolve endpoint — GitLab
-needs no GraphQL for this, unlike GitHub. With no validated allowlist installed,
-nothing SHALL be resolved. GitLab exposes no "the lines moved" flag, so the
+needs no GraphQL for this, unlike GitHub. With no validated allowlist in the
+submission, or no completed head (a partial run, a failure notice), nothing
+SHALL be resolved. GitLab exposes no "the lines moved" flag, so the
 adapter SHALL derive one: a discussion is outdated when a hunk of the straight
 diff from the head it is positioned at to the current head spans its new-side
 line on the hunk's old side (a pure insertion beside the line does not count),
@@ -87,6 +88,10 @@ review.
 
 #### Scenario: an unvalidated thread stays open
 - **WHEN** a review completes with an empty validated allowlist
+- **THEN** no discussion is resolved
+
+#### Scenario: an incomplete run names validated threads
+- **WHEN** a submission carries an allowlist but no completed head
 - **THEN** no discussion is resolved
 
 #### Scenario: a validated thread on a file the increment never touched

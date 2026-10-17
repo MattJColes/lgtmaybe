@@ -13,6 +13,7 @@ import pytest
 from lgtmaybe.core.models import ReviewFinding
 from lgtmaybe.core.ports import SupportsThreadResolution
 from lgtmaybe.gitea import GiteaGateway
+from tests.fakes import submission
 
 from .conftest import LOOP_LINE, Forgejo, PullRequest
 
@@ -68,7 +69,7 @@ def test_context_comes_from_the_api(forgejo: Forgejo, pull_request: PullRequest)
 
 
 def test_inline_and_demoted_findings_post(forgejo: Forgejo, pull_request: PullRequest) -> None:
-    _gateway(forgejo, pull_request).post_review([LOOP, UNANCHORED], "summary v1")
+    _gateway(forgejo, pull_request).post_review(submission([LOOP, UNANCHORED], "summary v1"))
 
     (review,) = forgejo.get(f"/pulls/{pull_request.number}/reviews")
     (comment,) = forgejo.get(f"/pulls/{pull_request.number}/reviews/{review['id']}/comments")
@@ -83,9 +84,9 @@ def test_inline_and_demoted_findings_post(forgejo: Forgejo, pull_request: PullRe
 def test_a_rerun_edits_the_summary_and_skips_posted_findings(
     forgejo: Forgejo, pull_request: PullRequest
 ) -> None:
-    _gateway(forgejo, pull_request).post_review([LOOP], "summary v1")
+    _gateway(forgejo, pull_request).post_review(submission([LOOP], "summary v1"))
 
-    _gateway(forgejo, pull_request).post_review([LOOP], "summary v2")
+    _gateway(forgejo, pull_request).post_review(submission([LOOP], "summary v2"))
 
     assert len(forgejo.get(f"/pulls/{pull_request.number}/reviews")) == 1
     (summary,) = _summaries(forgejo, pull_request)
@@ -96,7 +97,7 @@ def test_describe_and_diagram_upsert_in_their_own_families(
     forgejo: Forgejo, pull_request: PullRequest
 ) -> None:
     gateway = _gateway(forgejo, pull_request)
-    gateway.post_review([], "summary")
+    gateway.post_review(submission([], "summary"))
     gateway.post_describe_comment("describe v1")
     gateway.post_diagram_comment("diagram v1")
     gateway.post_describe_comment("describe v2")
