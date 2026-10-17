@@ -139,6 +139,7 @@ nav:
       - What gets reviewed: explanation/what-gets-reviewed.md
       - Risk of change: explanation/risk-of-change.md
       - Architecture: explanation/architecture.md
+      - Recovery evidence: explanation/recovery-evidence.md
       - Auth model: explanation/auth-model.md
       - Data and privacy: explanation/data-and-privacy.md
       - Trust and cost: explanation/trust-and-cost.md

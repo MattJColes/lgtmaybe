@@ -68,15 +68,13 @@ _log = get_logger("lgtmaybe.engine.engine")
 # split (see _review_split) cannot help, because a smaller payload does not
 # shrink a thinking budget.
 #
-# 0.9 because the two populations are nowhere near it from either side. Measured
-# on one self-review of this repo: five calls truncated at a 32,768 ceiling
-# having spent 25,963–35,463 tokens reasoning — 0.79 to over 1.0 of the cap,
-# clustering at 0.98+ — while the calls that answered normally wrote thousands of
-# tokens of findings after their thinking. The failure mode the split exists for
-# is the opposite shape: little thought, then an answer that runs long, where the
-# ratio is near zero. At 0.9 at most a tenth of the ceiling was left for the
-# answer, so halving the diff cannot buy a complete one — the only lever left is
-# `reasoning_effort`, which bounds the thinking directly.
+# 0.9 because the two populations are nowhere near it from either side: a
+# reasoning-bound truncation spends nearly all of the cap thinking, while the
+# failure the split exists for thinks little and then answers long, a ratio near
+# zero. At 0.9 at most a tenth of the ceiling was left for the answer, so halving
+# the diff cannot buy a complete one — the only lever left is
+# `reasoning_effort`, which bounds the thinking directly. The measurements:
+# docs/explanation/recovery-evidence.md, "The 0.9 Reasoning Share".
 #
 # Deliberately not configurable: it is a diagnosis, not a preference, and a knob
 # here would be one more thing to tune in the failure it exists to explain.
@@ -208,11 +206,10 @@ def _split_batch(
 def _rescue(calls: list[_PreparedCall], outcomes: list[_LensOutcome]) -> list[_LensOutcome]:
     """Re-run the calls that failed on the provider, once, and merge them in.
 
-    One flaky call used to void the whole round: three consecutive reviews
-    each reported "1 of 4 review calls failed" while the other three lenses
-    succeeded, and a run fifteen minutes later found what the partial rounds
-    had missed. The lenses that answered are not the problem — the one that
-    did not is, and the cheapest honest fix is to ask it again.
+    One flaky call must not void the whole round. The lenses that answered are
+    not the problem — the one that did not is, and the cheapest honest fix is
+    to ask it again. Why: docs/explanation/recovery-evidence.md, "The Rescue
+    Wave".
 
     Bounded on every axis that matters:
 
@@ -363,11 +360,9 @@ class _Ladder:
           mid-object well short of the cap — and only the unterminated JSON gives
           it away.
 
-        The second route used to end here with a reason saying no split was
-        attempted, so an identical failure cost the whole lens on one model and
-        merely a slower review on another. Measured on a gateway model at 43.2%
-        completeness over 100k-token inputs: what the declared ceiling bought was
-        recovery, not accuracy.
+        Both routes take this one ladder, so an identical failure costs the same
+        on every model. Why: docs/explanation/recovery-evidence.md, "One Ladder
+        for Both Truncation Detectors".
 
         *completed* is the salvage, already stamped. *exhausted* is the
         reasoning-bound diagnosis (see :func:`_reasoning_exhausted_reason`) or
@@ -460,9 +455,8 @@ class _Ladder:
         payload, same model, same budget, same ceiling — but the payload is the one
         thing we can change, and a smaller one both fits the budgets better and gets
         fresh ones. Failing the lens outright instead would discard the whole
-        batch's review over a size problem, which is what a real run did: three of
-        four lenses produced nothing because each had more to say than one response
-        could hold.
+        batch's review over a size problem (seen in a real run: see
+        docs/explanation/recovery-evidence.md, "Splitting an Oversized Batch").
 
         Bounded on purpose: exactly ONE level (the pieces are reviewed with
         ``batch=None``, so a piece that fails the same way again just fails), and
@@ -572,9 +566,8 @@ class _Ladder:
         #   drained is exactly what it needs — for THAT piece alone, which is
         #   what :class:`_PiecesReason` hands the rescue wave.
         #
-        # Collapsing the two is the bug this replaces: every split failure was
-        # reported plain, so a transient blip inside a piece silently forfeited
-        # the rescue the same blip would have got anywhere else.
+        # Never collapse the two (history: docs/explanation/recovery-evidence.md,
+        # "The Rescue Wave").
         if not errors:
             return findings, None
         # The message and the retryability come from different places, and reading
@@ -623,10 +616,9 @@ class _Ladder:
         reasoning-bound one cannot (halving the diff does not halve the thinking),
         so it changes the only variable that does move a thinking budget.
 
-        Without this, the reasoning branch diagnosed correctly and then stopped,
-        losing the lens for that round — a real dogfood review reviewed its tests
-        and documentation with nothing at all, and the message it left named a
-        knob for the reader to turn by hand next time.
+        Without this, the reasoning branch diagnoses correctly and then loses the
+        lens for that round. Why: docs/explanation/recovery-evidence.md,
+        "Stepping the Thinking Down".
 
         Bounded exactly like the split:
 
@@ -682,12 +674,10 @@ class _Ladder:
             # remedy for any of those, and the caller decides what is.
             return findings, error
         # The graded step landed nowhere: the same ceiling, spent the same way.
-        # Measured on GLM 5.3 through OpenRouter (a large PR, three rounds), where
-        # `low` and `minimal` both spent the whole 12,288 ceiling on thought in
-        # 10 retries of 11, and the fallback model then did the same at ten times
-        # the price. A model whose thinking is a switch does not answer to a
-        # dial, so the one further step is to off — and it is taken BEFORE the
-        # model changes, because switching model says nothing about the failure.
+        # A model whose thinking is a switch does not answer to a dial, so the
+        # one further step is to off — and it is taken BEFORE the model changes,
+        # because switching model says nothing about the failure. Measured:
+        # docs/explanation/recovery-evidence.md, "Stepping the Thinking Down".
         switch_off = recovery.disable_reasoning() if recovery is not None else None
         if not switch_off or switch_off == step_down:
             # No switch on this route, or the step-down already was it (a
@@ -731,11 +721,10 @@ class _Ladder:
         it re-sends the same request at the same ceiling and hopes a second model
         finishes it.
 
-        So it goes LAST. The adapter used to take it first — its own fallback
-        fired the moment the primary truncated, which meant the two aimed
-        remedies never ran and every truncation cost a second model's full
-        ceiling. Lens calls now carry ``defer_truncation``, which hands the
-        failure back here instead (see ``LiteLLMProvider.complete``).
+        So it goes LAST. Lens calls carry ``defer_truncation``, which hands the
+        failure back here instead of letting the adapter fall back first (see
+        ``LiteLLMProvider.complete``; history: docs/explanation/recovery-evidence.md,
+        "Escalation Goes Last").
 
         Bounded exactly like the retries beside it:
 
@@ -793,7 +782,7 @@ class _Ladder:
         back on its own for every failure that is not a truncation, and from up
         here that call is indistinguishable from an ordinary success. Recording
         only the escalations the engine drove would disclose half the rescues and
-        leave the other half silent — which is the state this replaces.
+        leave the other half silent.
 
         Fail-closed on both sides: an adapter or fake that reports neither model
         notes nothing, because "a second model answered" is a claim, and one that
@@ -828,8 +817,8 @@ class _Ladder:
         The theory this acts on: the prompt asks for the findings JSON regardless
         of the schema, and the parser is lenient about fences, prose wrappers and
         trailing commas, so a model whose constrained decoding produced something
-        unusable may well answer perfectly without it. Two Claude models did
-        exactly this through OpenRouter, losing every lens in an observation.
+        unusable may well answer perfectly without it (observed: see
+        docs/explanation/recovery-evidence.md, "Re-asking Without the Schema").
 
         Bounded like the step-down beside it:
 
@@ -1085,10 +1074,10 @@ class _Ladder:
         # says that because it has proof — a `length` finish reason, or a
         # response that spent a ceiling we set. Here there is none: the route
         # called this a clean finish and the body simply stops, which can mean
-        # a cap the route never mentions or a generation that fell over. The
-        # old wording asserted the ceiling anyway and printed `output_tokens`
-        # as if it were that ceiling, sending the reader to raise a number
-        # that may not be the one they hit.
+        # a cap the route never mentions or a generation that fell over, so
+        # naming a ceiling would send the reader to raise a number that may not
+        # be the one they hit (history: docs/explanation/recovery-evidence.md,
+        # "One Ladder for Both Truncation Detectors").
         reason = (
             f"response truncated: the body stopped mid-answer after "
             f"{result.output_tokens} output tokens while the route reported a clean "
@@ -1104,9 +1093,9 @@ class _Ladder:
             findings=salvaged,
             error=reason,
         )
-        # Same failure as the adapter-detected one, so the same ladder — this
-        # is the wire that was missing. The salvage is stamped like any other
-        # finding and rides along; the reason travels with it and is cleared
+        # Same failure as the adapter-detected one, so the same ladder. The
+        # salvage is stamped like any other finding and rides along; the reason
+        # travels with it and is cleared
         # only if a rung actually covers the batch, so a half-answer is never
         # read as a clean bill of health.
         #
@@ -1137,10 +1126,9 @@ def _reasoning_exhausted_reason(reasoning: int | None, ceiling: int | None) -> s
     A truncation normally means the payload asked for more answer than one
     response could hold, and the remedy is to cover less. Not when the ceiling
     went on *thought*: a reasoning model draws its thinking from the same
-    `max_tokens` budget, and halving the diff does not halve the thinking. The
-    observed proof is a fifteen-line diff truncating at the same ceiling as a
-    thousand-line one. Splitting there re-spends the whole ceiling on every piece
-    and fails identically — pure added latency on a review that is already slow.
+    `max_tokens` budget, and halving the diff does not halve the thinking.
+    Splitting there re-spends the whole ceiling on every piece and fails
+    identically — pure added latency on a review that is already slow.
 
     Decided from the numbers the adapter measured, never from its message: this
     reads the diagnosis as data, exactly as the structured findings contract
@@ -1162,14 +1150,8 @@ def _reasoning_exhausted_reason(reasoning: int | None, ceiling: int | None) -> s
     failure is not going to get and warns that a higher ceiling makes things
     worse — true of the content runaway it was written for, and the wrong half
     of the advice here. Both levers are named instead, because these numbers
-    cannot say which one is the fix.
-    Thinking that *expands to fill* whatever ceiling it is given is immune to a
-    bigger cap — the case recorded above, where the effort is the only move.
-    Thinking with a bounded natural size that merely exceeds this ceiling looks
-    identical here and is the opposite case: the cap fixes it outright, and
-    lowering the effort pays for the fix in review quality instead. Only a
-    re-run at a higher cap separates them, so the reader is handed the choice
-    rather than one of the two asserted as proven.
+    cannot say which one is the fix. Evidence and the full argument:
+    docs/explanation/recovery-evidence.md, "The 0.9 Reasoning Share".
     """
     if not reasoning or not ceiling:
         return None
@@ -1209,10 +1191,10 @@ def _salvage_truncated(exc: BaseException, lens: _Lens) -> list[ReviewFinding]:
 
 # How much of an unparseable reply is logged at DEBUG. Head *and* tail: a prose
 # preamble shows at the top and an unclosed container or a stray fence at the
-# bottom, and the two are different diagnoses. The observed failures ran
-# 676–1,201 tokens (roughly 2.7–4.8 KB), so this captures most of them whole —
-# and `response_chars` always reports the true length, so a cap never hides how
-# much was left out.
+# bottom, and the two are different diagnoses. Sized to capture most observed
+# failures whole (docs/explanation/recovery-evidence.md, "Diagnosing Unparseable
+# Replies"), and `response_chars` always reports the true length, so a cap never
+# hides how much was left out.
 _RAW_HEAD_CHARS = 2000
 _RAW_TAIL_CHARS = 500
 
@@ -1237,9 +1219,8 @@ def _response_digest(text: str) -> str:
     """A short, content-free identifier for a model reply.
 
     Two failures are only comparable if you can tell whether they are the same
-    failure, and the benchmark evidence behind this could not: it recorded that
-    a case failed in all three repeats without being able to say whether the
-    three replies were identical. A digest answers that across runs, machines
+    failure (why this exists: docs/explanation/recovery-evidence.md, "Diagnosing
+    Unparseable Replies"). A digest answers that across runs, machines
     and log aggregators while carrying nothing of the reply — which may quote
     the diff back, so it can never go in a default-level log.
 

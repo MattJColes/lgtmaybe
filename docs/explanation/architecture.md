@@ -405,7 +405,9 @@ none for ollama. lgtmaybe never stores or logs credentials.
 ## Reliability: Retries, Timeouts and Concurrency
 
 The provider wrapper (`LiteLLMProvider`) and the engine cooperate. A flaky
-network recovers, but a dead-end failure surfaces fast.
+network recovers, but a dead-end failure surfaces fast. The incidents and
+measurements behind these rules are in
+[Recovery Evidence](recovery-evidence.md).
 
 - **Retries are classified, not blanket.** Transient failures are retried with
     exponential backoff and jitter, up to four attempts. These count as
