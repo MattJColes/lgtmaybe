@@ -82,6 +82,34 @@ jobs:
             --accept-package-agreements --accept-source-agreements `
             --disable-interactivity
 
+      # wingetcreate makes dozens of REST calls on WINGET_TOKEN, and its owner's
+      # hourly quota is shared with everything else that owner runs; 2.15.1
+      # failed on wingetcreate's first call with "rate limit exceeded". Reading
+      # /rate_limit is free, so wait for the reset instead of failing a release.
+      - name: Wait for WINGET_TOKEN's rate limit
+        if: steps.package.outputs.exists == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          $needed = 100
+          $json = gh api rate_limit --jq '.resources.core'
+          if ($LASTEXITCODE -ne 0) {
+            throw "gh api rate_limit failed for WINGET_TOKEN (exit $LASTEXITCODE)"
+          }
+          $core = ($json -join "`n") | ConvertFrom-Json
+          Write-Output "WINGET_TOKEN core quota: $($core.remaining)/$($core.limit) remaining"
+          if ($core.remaining -lt $needed) {
+            $wait = [int]($core.reset - [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()) + 10
+            if ($wait -gt 3900) {
+              throw "WINGET_TOKEN's quota resets in $wait seconds, longer than one rate-limit window"
+            }
+            if ($wait -gt 0) {
+              Write-Output "Waiting $wait seconds for the quota to reset"
+              Start-Sleep -Seconds $wait
+            }
+          }
+
       - name: Submit winget update
         if: steps.package.outputs.exists == 'true'
         shell: pwsh
