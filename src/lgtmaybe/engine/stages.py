@@ -219,7 +219,7 @@ def _resolve_spec(cfg: ReviewConfig, ctx: PRContext, root: Path) -> _SpecContext
     )
     if not selected:
         return skipped
-    budget = cfg.max_input_tokens // _SPEC_BUDGET_DIVISOR
+    budget = cfg.batching.max_input_tokens // _SPEC_BUDGET_DIVISOR
     contents = specs.load_spec_files(
         selected,
         root=root,
@@ -277,7 +277,7 @@ def _definition_spans_by_path(
     is absent — so a caller reads ``.get(path)`` and gets ``None``, exactly the
     "no boundaries" value ``expand_hunks`` took before.
     """
-    if not cfg.function_context:
+    if not cfg.batching.function_context:
         return {}
     paths = [path for path, _ in file_patches if file_contents.get(path)]
     if not paths:
@@ -318,9 +318,9 @@ def _batch_budget(lenses: Sequence[_Lens], cfg: ReviewConfig) -> int:
     into single hunks — making a misconfiguration worse rather than safer.
     """
     overhead = _prompt_overhead_tokens(lenses, cfg)
-    if overhead * 2 >= cfg.max_input_tokens:
-        return max(1, cfg.max_input_tokens)
-    return cfg.max_input_tokens - overhead
+    if overhead * 2 >= cfg.batching.max_input_tokens:
+        return max(1, cfg.batching.max_input_tokens)
+    return cfg.batching.max_input_tokens - overhead
 
 
 def _unbatched_hint_carrier(lenses: Sequence[_Lens]) -> _Lens | None:
@@ -354,13 +354,17 @@ def lens_ceilings(cfg: ReviewConfig) -> tuple[float | None, int | None]:
     # instant are skipped (in-flight ones finish), so a pathological run
     # degrades to partial-with-a-notice instead of grinding on. Measured
     # from here so every stage — not just the model calls — counts.
-    deadline_at = time.perf_counter() + cfg.max_review_seconds if cfg.max_review_seconds else None
+    deadline_at = (
+        time.perf_counter() + cfg.limits.max_review_seconds
+        if cfg.limits.max_review_seconds
+        else None
+    )
     # Soft whole-review token ceiling, the spend-shaped twin of the deadline
     # above. Counted on this run's own tally, from zero: every model call
     # this review makes goes through `provider`, which charges it to
     # `state`, so neither an earlier review in this process nor one running
     # beside it on the same engine is charged against this budget.
-    budget_at = cfg.max_review_tokens or None
+    budget_at = cfg.limits.max_review_tokens or None
 
     # Lens calls stop EARLY, leaving the tail of each ceiling for the
     # auditor. Reflection prunes a bad review, so if the lens fan-out spends
@@ -373,12 +377,14 @@ def lens_ceilings(cfg: ReviewConfig) -> tuple[float | None, int | None]:
     # fixed number of seconds means a deliberately small ceiling does not
     # hand most of its budget to the auditor.
     lens_deadline_at = (
-        deadline_at - min(cfg.max_review_seconds * _REFLECT_RESERVE, _MAX_REFLECT_RESERVE_S)
+        deadline_at - min(cfg.limits.max_review_seconds * _REFLECT_RESERVE, _MAX_REFLECT_RESERVE_S)
         if deadline_at is not None
         else None
     )
     lens_budget_at = (
-        budget_at - int(cfg.max_review_tokens * _REFLECT_RESERVE) if budget_at is not None else None
+        budget_at - int(cfg.limits.max_review_tokens * _REFLECT_RESERVE)
+        if budget_at is not None
+        else None
     )
     return lens_deadline_at, lens_budget_at
 
@@ -432,7 +438,11 @@ def retrieval_budget(cfg: ReviewConfig, *, can_fetch: bool) -> int | None:
     # the call chain — it answers both "may this lens defer?" and "with how
     # many tokens?". A quarter of the input budget, the same slice
     # reflection's deferral takes.
-    return max(0, cfg.max_input_tokens // 4) if cfg.mid_review_retrieval and can_fetch else None
+    return (
+        max(0, cfg.batching.max_input_tokens // 4)
+        if cfg.mid_review_retrieval and can_fetch
+        else None
+    )
 
 
 class FilteredFiles(NamedTuple):
@@ -454,7 +464,9 @@ def filter_files(diff: str, ctx: PRContext, cfg: ReviewConfig) -> FilteredFiles:
             (path, patch)
             for path, patch in file_patches
             if is_reviewable(path)
-            and passes_path_filters(path, include=cfg.include_paths, exclude=cfg.exclude_paths)
+            and passes_path_filters(
+                path, include=cfg.batching.include_paths, exclude=cfg.batching.exclude_paths
+            )
         ]
 
         # 2b. Per-file size cap: a patch longer than max_file_diff_lines is a
@@ -466,7 +478,7 @@ def filter_files(diff: str, ctx: PRContext, cfg: ReviewConfig) -> FilteredFiles:
         oversized: list[str] = []
         kept: list[tuple[str, str]] = []
         for path, patch in file_patches:
-            if passes_size_cap(patch, cfg.max_file_diff_lines):
+            if passes_size_cap(patch, cfg.batching.max_file_diff_lines):
                 kept.append((path, patch))
             else:
                 oversized.append(path)
@@ -548,9 +560,9 @@ def cap_files(file_patches: list[_Patch], cfg: ReviewConfig) -> tuple[list[_Patc
     """Stage 3d: the first ``max_files`` patches, and whether the cap cut any."""
     # 3d. File cap: after triage so it drops the lowest-risk survivors,
     # rather than whichever paths happened to appear last in the diff.
-    capped_files = len(file_patches) > cfg.max_files
+    capped_files = len(file_patches) > cfg.batching.max_files
     if capped_files:
-        file_patches = file_patches[: cfg.max_files]
+        file_patches = file_patches[: cfg.batching.max_files]
     return file_patches, capped_files
 
 
@@ -558,7 +570,7 @@ def expand_context(file_patches: list[_Patch], ctx: PRContext, cfg: ReviewConfig
     """Stage 4: pad each hunk with surrounding head-text lines, within the budget."""
     # 4. Pad each hunk with surrounding lines so the model sees the function
     #    and definitions around a change. The amount is budget-scaled and
-    #    capped by cfg.context_lines; the pad is asymmetric — the code
+    #    capped by cfg.batching.context_lines; the pad is asymmetric — the code
     #    before a change explains it better than the code after, so the
     #    trailing side gets a quarter of the leading budget. Content is the
     #    head file text the gateway fetched (redacted), and is for
@@ -566,8 +578,8 @@ def expand_context(file_patches: list[_Patch], ctx: PRContext, cfg: ReviewConfig
     #    from the real diff.
     with profiler.stage("expand"):
         used_tokens = sum(count_tokens(patch) for _, patch in file_patches)
-        remaining = max(0, cfg.max_input_tokens - used_tokens)
-        ctx_lines = min(cfg.context_lines, context_lines_for_budget(remaining))
+        remaining = max(0, cfg.batching.max_input_tokens - used_tokens)
+        ctx_lines = min(cfg.batching.context_lines, context_lines_for_budget(remaining))
         if ctx_lines > 0 and ctx.file_contents:
             after = trailing_context_lines(ctx_lines)
             # Enclosing function/class boundaries (ast-grep; [] on any
@@ -599,7 +611,7 @@ def batch_patches(
     """Stage 4a: pack the patches into batches that fit one lens call's budget."""
     with profiler.stage("batch"):
         return batch_files(
-            file_patches, max_tokens=_batch_budget(lenses, cfg), recursive=cfg.recursive
+            file_patches, max_tokens=_batch_budget(lenses, cfg), recursive=cfg.batching.recursive
         )
 
 

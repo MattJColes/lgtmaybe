@@ -492,8 +492,8 @@ class TestActionRouting:
         import lgtmaybe.cli as cli_module
 
         def fake_build(cfg, runtime):
-            captured["timeout"] = cfg.timeout
-            captured["temperature"] = cfg.temperature
+            captured["timeout"] = cfg.request.timeout
+            captured["temperature"] = cfg.request.temperature
             return FakeGitHub(), FakeEngine(FakeProvider()), FakeProvider()
 
         monkeypatch.setattr(cli_module, "build_review_context", fake_build)
@@ -528,7 +528,7 @@ class TestActionRouting:
         import lgtmaybe.cli as cli_module
 
         def fake_build(cfg, runtime):
-            captured["max_tokens"] = cfg.max_tokens
+            captured["max_tokens"] = cfg.request.max_tokens
             return FakeGitHub(), FakeEngine(FakeProvider()), FakeProvider()
 
         monkeypatch.setattr(cli_module, "build_review_context", fake_build)
@@ -560,7 +560,7 @@ class TestActionRouting:
         import lgtmaybe.cli as cli_module
 
         def fake_build(cfg, runtime):
-            captured["reasoning_effort"] = cfg.reasoning_effort
+            captured["reasoning_effort"] = cfg.request.reasoning_effort
             return FakeGitHub(), FakeEngine(FakeProvider()), FakeProvider()
 
         monkeypatch.setattr(cli_module, "build_review_context", fake_build)
@@ -595,7 +595,7 @@ class TestActionRouting:
         import lgtmaybe.cli as cli_module
 
         def fake_build(cfg, runtime):
-            captured["reasoning_effort"] = cfg.reasoning_effort
+            captured["reasoning_effort"] = cfg.request.reasoning_effort
             return FakeGitHub(), FakeEngine(FakeProvider()), FakeProvider()
 
         monkeypatch.setattr(cli_module, "build_review_context", fake_build)
@@ -629,7 +629,7 @@ class TestActionRouting:
         import lgtmaybe.cli as cli_module
 
         def fake_build(cfg, runtime):
-            captured["max_tokens"] = cfg.max_tokens
+            captured["max_tokens"] = cfg.request.max_tokens
             return FakeGitHub(), FakeEngine(FakeProvider()), FakeProvider()
 
         monkeypatch.setattr(cli_module, "build_review_context", fake_build)
@@ -710,8 +710,8 @@ class TestActionRouting:
         import lgtmaybe.cli as cli_module
 
         def fake_build(cfg, runtime):
-            captured["num_ctx"] = cfg.num_ctx
-            captured["max_input_tokens"] = cfg.max_input_tokens
+            captured["num_ctx"] = cfg.request.num_ctx
+            captured["max_input_tokens"] = cfg.batching.max_input_tokens
             return FakeGitHub(), FakeEngine(FakeProvider()), FakeProvider()
 
         monkeypatch.setattr(cli_module, "build_review_context", fake_build)
@@ -793,7 +793,7 @@ class TestActionRouting:
     def test_action_inputs_are_derived_from_review_config(self):
         """`action_inputs()` reads a written-out name list, not ReviewConfig's fields.
 
-        Deriving the names from ``ReviewConfig.model_fields`` would silently
+        Deriving the names from ``ReviewConfig.flat_fields()`` would silently
         accept INPUT_* vars `action.yml` never declares — so a config field with
         no matching action input must stay unreadable from the environment.
         """
@@ -801,7 +801,7 @@ class TestActionRouting:
         from lgtmaybe.core.models import ReviewConfig
 
         assert set(action_inputs()) == (
-            set(ReviewConfig.model_fields) - _ACTION_CONFIG_EXCLUSIONS | _RUNTIME_INPUTS
+            set(ReviewConfig.flat_fields()) - _ACTION_CONFIG_EXCLUSIONS | _RUNTIME_INPUTS
         )
 
     def test_structured_output_input_is_read(self, monkeypatch):

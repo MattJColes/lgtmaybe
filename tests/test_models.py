@@ -132,18 +132,18 @@ def test_review_config_api_base_defaults_to_none() -> None:
 def test_review_config_timeout_defaults_to_none_auto() -> None:
     # None means "auto" — the factory resolves a provider-aware default.
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
-    assert cfg.timeout is None
+    assert cfg.request.timeout is None
 
 
 def test_review_config_accepts_timeout() -> None:
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3", timeout=600)
-    assert cfg.timeout == 600
+    assert cfg.request.timeout == 600
 
 
 def test_review_config_accepts_the_smallest_timeout() -> None:
     # 1 is the floor: the accepted range is "any positive number of seconds".
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3", timeout=1)
-    assert cfg.timeout == 1
+    assert cfg.request.timeout == 1
 
 
 @pytest.mark.parametrize("timeout", [0, -30])
@@ -157,12 +157,12 @@ def test_review_config_rejects_non_positive_timeout(timeout: int) -> None:
 def test_review_config_recursive_defaults_true() -> None:
     # RLM-style hunk walk for over-budget files is active by default.
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
-    assert cfg.recursive is True
+    assert cfg.batching.recursive is True
 
 
 def test_review_config_accepts_recursive_false() -> None:
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3", recursive=False)
-    assert cfg.recursive is False
+    assert cfg.batching.recursive is False
 
 
 def test_review_config_symbol_resolution_defaults_true() -> None:
@@ -252,12 +252,12 @@ def test_review_config_accepts_ignore_fingerprints() -> None:
 
 def test_review_config_temperature_defaults_to_zero() -> None:
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
-    assert cfg.temperature == 0.0
+    assert cfg.request.temperature == 0.0
 
 
 def test_review_config_accepts_temperature() -> None:
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3", temperature=0.7)
-    assert cfg.temperature == 0.7
+    assert cfg.request.temperature == 0.7
 
 
 def test_custom_lens_minimal_fields() -> None:
@@ -282,7 +282,7 @@ def test_reasoning_effort_defaults_to_unset() -> None:
     """Off unless asked for: a route that does not accept the param must not
     start receiving it because lgtmaybe upgraded."""
     cfg = ReviewConfig(provider=Provider.openrouter, model="vendor/m")
-    assert cfg.reasoning_effort is None
+    assert cfg.request.reasoning_effort is None
 
 
 def test_custom_lens_id_must_not_collide_with_builtin() -> None:

@@ -170,7 +170,7 @@ def structured_call(
     if intent:
         parts.append(wrap_intent(redact(intent)))
     parts.extend(extra_blocks)
-    diff = _fit_diff(redact(ctx.diff), cfg.max_input_tokens)
+    diff = _fit_diff(redact(ctx.diff), cfg.batching.max_input_tokens)
     parts.append(f"{diff_preamble}{DIFF_START}\n{neutralise(diff)}\n{DIFF_END}")
     user = "\n\n".join(parts) + task_suffix
 

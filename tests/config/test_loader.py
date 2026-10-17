@@ -161,14 +161,14 @@ def test_context_lines_defaults_and_overrides(tmp_path):
     """context_lines defaults to 20, is read from file, and can be overridden (incl. 0)."""
     cfg_file = tmp_path / ".lgtmaybe.yml"
     cfg_file.write_text("provider: openai\nmodel: gpt-4o\n")
-    assert load_config(config_path=cfg_file).context_lines == 20
+    assert load_config(config_path=cfg_file).batching.context_lines == 20
 
     cfg_file.write_text("provider: openai\nmodel: gpt-4o\ncontext_lines: 5\n")
     from_file = load_config(config_path=cfg_file)
-    assert from_file.context_lines == 5
+    assert from_file.batching.context_lines == 5
 
     overridden = load_config(config_path=cfg_file, context_lines=0)
-    assert overridden.context_lines == 0
+    assert overridden.batching.context_lines == 0
 
 
 def test_max_input_tokens_and_num_ctx_defaults_and_overrides(tmp_path):
@@ -177,16 +177,16 @@ def test_max_input_tokens_and_num_ctx_defaults_and_overrides(tmp_path):
     cfg_file.write_text("provider: ollama\nmodel: llama3\n")
 
     base = load_config(config_path=cfg_file)
-    assert base.max_input_tokens == 100_000
-    assert base.num_ctx is None
+    assert base.batching.max_input_tokens == 100_000
+    assert base.request.num_ctx is None
 
     overridden = load_config(
         config_path=cfg_file,
         max_input_tokens=250_000,
         num_ctx=32768,
     )
-    assert overridden.max_input_tokens == 250_000
-    assert overridden.num_ctx == 32768
+    assert overridden.batching.max_input_tokens == 250_000
+    assert overridden.request.num_ctx == 32768
 
 
 def test_cli_input_overrides_provider(tmp_path):

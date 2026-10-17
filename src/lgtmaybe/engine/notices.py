@@ -92,15 +92,15 @@ def _build_notices(state: _NoticeState) -> list[str]:
     cfg = state.cfg
     if state.capped_files:
         notices.append(
-            f"⚠️ Reviewed the top {cfg.max_files} of {state.total_files} changed files "
-            f"(file cap {cfg.max_files}). Raise max_files to review them all."
+            f"⚠️ Reviewed the top {cfg.batching.max_files} of {state.total_files} changed files "
+            f"(file cap {cfg.batching.max_files}). Raise max_files to review them all."
         )
     if state.oversized:
         listed = ", ".join(code_span(path) for path in state.oversized[:10])
         more = ", …" if len(state.oversized) > 10 else ""
         notices.append(
             f"📄 Skipped {len(state.oversized)} oversized file{_plural(len(state.oversized))} "
-            f"(over {cfg.max_file_diff_lines} diff lines): {listed}{more}. "
+            f"(over {cfg.batching.max_file_diff_lines} diff lines): {listed}{more}. "
             "Raise `max_file_diff_lines` (0 disables) to review them."
         )
     if state.skipped_by_triage:
@@ -114,7 +114,7 @@ def _build_notices(state: _NoticeState) -> list[str]:
     if state.spec_unfit:
         listed = ", ".join(code_span(root) for root in state.spec_unfit)
         count = len(state.spec_unfit)
-        budget = cfg.max_input_tokens // _SPEC_BUDGET_DIVISOR
+        budget = cfg.batching.max_input_tokens // _SPEC_BUDGET_DIVISOR
         outcome = (
             "the spec lens judged the diff against the rest only"
             if state.spec_reviewed
@@ -130,7 +130,7 @@ def _build_notices(state: _NoticeState) -> list[str]:
     budget_skips = state.errors.count(_BUDGET_SKIP_REASON)
     if budget_skips:
         notices.append(
-            f"💸 Token budget reached ({cfg.max_review_tokens} billable tokens): "
+            f"💸 Token budget reached ({cfg.limits.max_review_tokens} billable tokens): "
             f"{budget_skips} of {state.total_calls} review call"
             f"{_plural(budget_skips, ' was', 's were')} skipped, so this review is partial. "
             "Raise `max_review_tokens`, or spend less per run (a `triage_model`, fewer "
@@ -222,7 +222,7 @@ def _build_notices(state: _NoticeState) -> list[str]:
             f"`{lens}` ({dropped} dropped)" for lens, dropped in sorted(state.flooded.items())
         )
         notices.append(
-            f"⚠️ Bounded a lens to the top {cfg.max_findings_per_lens} findings by severity: "
+            f"⚠️ Bounded a lens to the top {cfg.limits.max_findings_per_lens} findings by severity: "
             f"{listed}. A lens returning many more findings than this is usually restating "
             f"one claim across many lines. Raise max_findings_per_lens to keep them all."
         )
@@ -246,7 +246,7 @@ def _build_notices(state: _NoticeState) -> list[str]:
     if state.reflection_trimmed:
         notices.append(
             "✂️ The self-reflection audit ran on a trimmed diff: the full diff "
-            f"exceeded `max_input_tokens` ({cfg.max_input_tokens:,}), so only the "
+            f"exceeded `max_input_tokens` ({cfg.batching.max_input_tokens:,}), so only the "
             "flagged files' patches that fit were kept, in diff order. Flagged "
             "patches too large to fit were skipped. Raise `max_input_tokens` to "
             "audit the whole diff."

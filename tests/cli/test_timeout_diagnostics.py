@@ -143,7 +143,7 @@ def test_a_local_default_is_widened_for_the_fan_out_it_will_queue_behind(cli_log
     provider = build_provider_engine(cfg, _runtime())[1]
 
     unscaled = default_timeout_for(Provider.ollama)
-    expected = min(unscaled * concurrency_cap(cfg), cfg.max_review_seconds)
+    expected = min(unscaled * concurrency_cap(cfg), cfg.limits.max_review_seconds)
     assert expected > unscaled, "the fixture must actually exercise a widening"
     assert provider.default_opts["timeout"] == expected
 
@@ -180,7 +180,7 @@ def test_the_widened_budget_never_outlives_the_whole_review_deadline(cli_logs) -
     provider = build_provider_engine(cfg, _runtime())[1]
 
     resolved = provider.default_opts["timeout"]
-    assert resolved <= cfg.max_review_seconds
+    assert resolved <= cfg.limits.max_review_seconds
     assert resolved > default_timeout_for(Provider.ollama), "still widened, just bounded"
 
 

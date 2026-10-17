@@ -2749,7 +2749,10 @@ def test_a_scan_finding_on_a_file_the_cap_dropped_still_posts(monkeypatch) -> No
     engine = LLMReviewEngine(provider)
 
     findings, summary = engine.review(
-        _CAP_CTX, _finding_mode_cfg().model_copy(update={"max_files": 1})
+        _CAP_CTX,
+        _finding_mode_cfg().model_copy(
+            update={"batching": _finding_mode_cfg().batching.model_copy(update={"max_files": 1})}
+        ),
     )
 
     assert [(f.path, f.line) for f in findings] == [("g.py", 2)]
@@ -4047,7 +4050,7 @@ class TestBatchBudgetCoversTheWholePrompt:
         overhead = _prompt_overhead_tokens(lenses, cfg)
 
         assert overhead > 0, "the preamble and lens block are not free"
-        assert overhead < cfg.max_input_tokens // 2, "the reserve must not eat the budget"
+        assert overhead < cfg.batching.max_input_tokens // 2, "the reserve must not eat the budget"
 
     def test_the_reserve_covers_the_largest_lens_not_the_smallest(self) -> None:
         """Lenses are sized differently and each call carries exactly one, so the

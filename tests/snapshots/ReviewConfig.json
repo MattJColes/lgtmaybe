@@ -1,5 +1,58 @@
 {
   "$defs": {
+    "BatchingConfig": {
+      "additionalProperties": false,
+      "description": "How the diff becomes model calls: which files, how much of each, how much\ncontext around a hunk, and the per-call input budget.\n\nRead by the preparation stages that filter, cap, expand and split the diff,\nand wherever a later pass sizes its own prompt against ``max_input_tokens``.\nEach key can also be set flat at the top level of the config (see\n``ReviewConfig``).",
+      "properties": {
+        "context_lines": {
+          "default": 20,
+          "title": "Context Lines",
+          "type": "integer"
+        },
+        "exclude_paths": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Exclude Paths",
+          "type": "array"
+        },
+        "function_context": {
+          "default": true,
+          "title": "Function Context",
+          "type": "boolean"
+        },
+        "include_paths": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Include Paths",
+          "type": "array"
+        },
+        "max_file_diff_lines": {
+          "default": 2000,
+          "minimum": 0,
+          "title": "Max File Diff Lines",
+          "type": "integer"
+        },
+        "max_files": {
+          "default": 50,
+          "title": "Max Files",
+          "type": "integer"
+        },
+        "max_input_tokens": {
+          "default": 100000,
+          "title": "Max Input Tokens",
+          "type": "integer"
+        },
+        "recursive": {
+          "default": true,
+          "title": "Recursive",
+          "type": "boolean"
+        }
+      },
+      "title": "BatchingConfig",
+      "type": "object"
+    },
     "CustomLens": {
       "additionalProperties": false,
       "description": "A user-defined review lens \u2014 a \"skill file\" run alongside the built-ins.\n\nThe engine fans it out as its own focused LLM call (same pipeline as a\nbuilt-in ``ReviewCategory``) and merges its findings with the rest. A lens is\ndeclared in **trusted** config (``.lgtmaybe.yml`` or a file referenced by\n``lens_paths``), never from PR-author content, so its text is safe to put in\nthe system prompt. Supplying a worked example (``example_diff`` +\n``example_finding``) is optional but sharply improves a small model's output.",
@@ -177,6 +230,45 @@
       "title": "FindingRuleMatch",
       "type": "object"
     },
+    "LimitsConfig": {
+      "additionalProperties": false,
+      "description": "Whole-run ceilings: wall clock, billable tokens, findings per call, and\nhow many calls run at once.\n\nRead by the run state every call shares and by the fan-out pool. Each key\ncan also be set flat at the top level of the config.",
+      "properties": {
+        "max_concurrency": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Concurrency"
+        },
+        "max_findings_per_lens": {
+          "default": 50,
+          "minimum": 0,
+          "title": "Max Findings Per Lens",
+          "type": "integer"
+        },
+        "max_review_seconds": {
+          "default": 3600,
+          "minimum": 0,
+          "title": "Max Review Seconds",
+          "type": "integer"
+        },
+        "max_review_tokens": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Max Review Tokens",
+          "type": "integer"
+        }
+      },
+      "title": "LimitsConfig",
+      "type": "object"
+    },
     "ProjectProfile": {
       "additionalProperties": false,
       "description": "What the repository is, so a review can be calibrated to the workload.\n\nA weekend prototype and a regulated payments service should not get the\nsame review. ``stage`` sets defaults for existing settings (a prototype\nraises the ``min_severity`` default to ``medium``; a regulated workload\nfloors the risk verdict of any change that isn't only docs and tests at\n``medium``), and an explicitly configured setting always wins. All three\nfields also render one short trusted paragraph in the shared review\npreamble. Empty (the default) is byte-identical to a review without the\nfeature.\n\nStructured on purpose: reading AGENTS.md or similar wholesale brings\ncoding-agent instructions the reviewer has no use for, and usually more\ntext than the context budget takes.",
@@ -237,6 +329,77 @@
       ],
       "title": "Provider",
       "type": "string"
+    },
+    "RequestConfig": {
+      "additionalProperties": false,
+      "description": "How each completion request is shaped: its timeout, sampling, output and\nreasoning budget, and ollama's context window.\n\nRead only where the provider client is built. Each key can also be set flat\nat the top level of the config.",
+      "properties": {
+        "max_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Tokens"
+        },
+        "num_ctx": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Num Ctx"
+        },
+        "reasoning_effort": {
+          "anyOf": [
+            {
+              "enum": [
+                "none",
+                "minimal",
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "default"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reasoning Effort"
+        },
+        "temperature": {
+          "default": 0.0,
+          "title": "Temperature",
+          "type": "number"
+        },
+        "timeout": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timeout"
+        }
+      },
+      "title": "RequestConfig",
+      "type": "object"
     },
     "ReviewCategory": {
       "description": "A single review lens. The engine asks for each one in its own LLM call.\n\n``intent`` checks the diff against the PR's stated intent (title, description,\ncommit messages); it only runs when the context carries some stated intent.\n``ponytail`` is the \"lazy senior dev\" lens \u2014 the best code is the code you\nnever wrote \u2014 flagging code that needn't exist at all (YAGNI, reach for the\nstandard library, do it in fewer lines).\n``architecture`` flags design decisions the diff introduces that are\nexpensive to reverse \u2014 coupling across boundaries, dependency direction,\nbroken substitutability, misuse-prone public surface \u2014 each tied to a\nconcrete change scenario.\n``spec`` checks the diff against a specification the repository commits\n(OpenSpec, GitHub Spec Kit, Kiro); like ``intent`` it only runs when there is\nsomething to check against \u2014 here, a detected spec that matches the PR.",
@@ -517,7 +680,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "How to run one review: provider/model, severity floor, filters, caps.",
+  "description": "How to run one review: provider/model, severity floor, filters, caps.\n\nSettings one stage reads together live in a group (``batching``, ``limits``,\n``request``, like ``static_analysis`` and ``risk``), so a reader names the\ngroup it depends on: ``cfg.batching.max_input_tokens``. Every surface that\nsets config still speaks the flat keys (``max_input_tokens: 40000`` in\n``.lgtmaybe.yml``, ``lgtmaybe config set``, CLI flags, Action inputs,\n``ReviewConfig(max_input_tokens=...)``): ``_lift_groups`` moves each into\nits group before validation. ``flat_fields`` is that flat key set.",
   "properties": {
     "api_base": {
       "anyOf": [
@@ -541,6 +704,19 @@
       "title": "Auto Diagram",
       "type": "boolean"
     },
+    "batching": {
+      "$ref": "#/$defs/BatchingConfig",
+      "default": {
+        "context_lines": 20,
+        "exclude_paths": [],
+        "function_context": true,
+        "include_paths": [],
+        "max_file_diff_lines": 2000,
+        "max_files": 50,
+        "max_input_tokens": 100000,
+        "recursive": true
+      }
+    },
     "categories": {
       "default": [
         "security",
@@ -561,23 +737,11 @@
       "title": "Categories",
       "type": "array"
     },
-    "context_lines": {
-      "default": 20,
-      "title": "Context Lines",
-      "type": "integer"
-    },
     "directory_rules": {
       "items": {
         "$ref": "#/$defs/DirectoryRule"
       },
       "title": "Directory Rules",
-      "type": "array"
-    },
-    "exclude_paths": {
-      "items": {
-        "type": "string"
-      },
-      "title": "Exclude Paths",
       "type": "array"
     },
     "extra_lenses": {
@@ -617,11 +781,6 @@
       "title": "Finding Rules",
       "type": "array"
     },
-    "function_context": {
-      "default": true,
-      "title": "Function Context",
-      "type": "boolean"
-    },
     "high_impact": {
       "default": true,
       "title": "High Impact",
@@ -632,13 +791,6 @@
         "type": "string"
       },
       "title": "Ignore Fingerprints",
-      "type": "array"
-    },
-    "include_paths": {
-      "items": {
-        "type": "string"
-      },
-      "title": "Include Paths",
       "type": "array"
     },
     "incremental": {
@@ -670,65 +822,14 @@
       "title": "Learn Feedback",
       "type": "boolean"
     },
-    "max_concurrency": {
-      "anyOf": [
-        {
-          "minimum": 1,
-          "type": "integer"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Max Concurrency"
-    },
-    "max_file_diff_lines": {
-      "default": 2000,
-      "minimum": 0,
-      "title": "Max File Diff Lines",
-      "type": "integer"
-    },
-    "max_files": {
-      "default": 50,
-      "title": "Max Files",
-      "type": "integer"
-    },
-    "max_findings_per_lens": {
-      "default": 50,
-      "minimum": 0,
-      "title": "Max Findings Per Lens",
-      "type": "integer"
-    },
-    "max_input_tokens": {
-      "default": 100000,
-      "title": "Max Input Tokens",
-      "type": "integer"
-    },
-    "max_review_seconds": {
-      "default": 3600,
-      "minimum": 0,
-      "title": "Max Review Seconds",
-      "type": "integer"
-    },
-    "max_review_tokens": {
-      "default": 0,
-      "minimum": 0,
-      "title": "Max Review Tokens",
-      "type": "integer"
-    },
-    "max_tokens": {
-      "anyOf": [
-        {
-          "minimum": 0,
-          "type": "integer"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Max Tokens"
+    "limits": {
+      "$ref": "#/$defs/LimitsConfig",
+      "default": {
+        "max_concurrency": null,
+        "max_findings_per_lens": 50,
+        "max_review_seconds": 3600,
+        "max_review_tokens": 0
+      }
     },
     "mid_review_retrieval": {
       "default": false,
@@ -750,18 +851,6 @@
       "title": "Model",
       "type": "string"
     },
-    "num_ctx": {
-      "anyOf": [
-        {
-          "type": "integer"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Num Ctx"
-    },
     "pr_labels": {
       "default": false,
       "title": "Pr Labels",
@@ -776,32 +865,6 @@
     },
     "provider": {
       "$ref": "#/$defs/Provider"
-    },
-    "reasoning_effort": {
-      "anyOf": [
-        {
-          "enum": [
-            "none",
-            "minimal",
-            "low",
-            "medium",
-            "high",
-            "xhigh",
-            "default"
-          ],
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Reasoning Effort"
-    },
-    "recursive": {
-      "default": true,
-      "title": "Recursive",
-      "type": "boolean"
     },
     "reflect": {
       "default": true,
@@ -824,6 +887,16 @@
       "default": true,
       "title": "Repair Unparseable",
       "type": "boolean"
+    },
+    "request": {
+      "$ref": "#/$defs/RequestConfig",
+      "default": {
+        "max_tokens": null,
+        "num_ctx": null,
+        "reasoning_effort": null,
+        "temperature": 0.0,
+        "timeout": null
+      }
     },
     "resolve_fixed": {
       "default": true,
@@ -896,23 +969,6 @@
       "default": true,
       "title": "Symbol Resolution",
       "type": "boolean"
-    },
-    "temperature": {
-      "default": 0.0,
-      "title": "Temperature",
-      "type": "number"
-    },
-    "timeout": {
-      "anyOf": [
-        {
-          "type": "integer"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Timeout"
     },
     "triage_model": {
       "anyOf": [

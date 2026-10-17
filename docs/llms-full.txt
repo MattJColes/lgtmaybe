@@ -4125,6 +4125,11 @@ lists every field with its type and default, including the tuning knobs not
 described here (`max_tokens`, `reasoning_effort`, `temperature`, `language`,
 `fail_on`, `max_review_seconds`, `max_review_tokens` and others).
 
+Every key on this page is a top-level key. Some also belong to a group
+(`batching`, `limits` or `request`), and you may nest them under it instead.
+Both forms load the same config, so existing files need no change. The
+reference lists each group's keys.
+
 ### provider
 
 Which LLM backend, or [provider](../reference/glossary.md#provider), to use. One of `openai`, `openrouter`, `anthropic`, `zai`,
@@ -7382,43 +7387,31 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `api_base` | string / null | No | `null` | Api Base |
 | `auto_describe` | boolean | No | `True` | Auto Describe |
 | `auto_diagram` | boolean | No | `True` | Auto Diagram |
+| `batching` | BatchingConfig | No | `{'include_paths': [], 'exclude_paths': [], 'max_files': 50, 'max_file_diff_lines': 2000, 'max_input_tokens': 100000, 'recursive': True, 'context_lines': 20, 'function_context': True}` |  |
 | `categories` | list[`architecture` / `complexity` / `correctness` / `deprecation` / `documentation` / `intent` / `performance` / `ponytail` / `security` / `spec` / `tests`] | No | `['security', 'correctness', 'deprecation', 'tests', 'documentation', 'performance', 'complexity', 'intent', 'ponytail', 'architecture', 'spec']` | Categories |
-| `context_lines` | integer | No | `20` | Context Lines |
 | `directory_rules` | list[DirectoryRule] | No | `[]` | Directory Rules |
-| `exclude_paths` | list[string] | No | `[]` | Exclude Paths |
 | `extra_lenses` | list[CustomLens] | No | `[]` | Extra Lenses |
 | `fail_on` | `critical` / `high` / `info` / `low` / `medium` / null | No | `null` |  |
 | `fallback_model` | string / null | No | `null` | Fallback Model |
 | `finding_rules` | list[FindingRule] | No | `[]` | Finding Rules |
-| `function_context` | boolean | No | `True` | Function Context |
 | `high_impact` | boolean | No | `True` | High Impact |
 | `ignore_fingerprints` | list[string] | No | `[]` | Ignore Fingerprints |
-| `include_paths` | list[string] | No | `[]` | Include Paths |
 | `incremental` | boolean / null | No | `null` | Incremental |
 | `language` | string / null | No | `null` | Language |
 | `learn_feedback` | boolean | No | `True` | Learn Feedback |
-| `max_concurrency` | integer / null | No | `null` | Max Concurrency |
-| `max_file_diff_lines` | integer | No | `2000` | Max File Diff Lines |
-| `max_files` | integer | No | `50` | Max Files |
-| `max_findings_per_lens` | integer | No | `50` | Max Findings Per Lens |
-| `max_input_tokens` | integer | No | `100000` | Max Input Tokens |
-| `max_review_seconds` | integer | No | `3600` | Max Review Seconds |
-| `max_review_tokens` | integer | No | `0` | Max Review Tokens |
-| `max_tokens` | integer / null | No | `null` | Max Tokens |
+| `limits` | LimitsConfig | No | `{'max_review_seconds': 3600, 'max_review_tokens': 0, 'max_findings_per_lens': 50, 'max_concurrency': None}` |  |
 | `mid_review_retrieval` | boolean | No | `False` | Mid Review Retrieval |
 | `min_confidence` | integer | No | `0` | Min Confidence |
 | `min_severity` | `critical` / `high` / `info` / `low` / `medium` | No | `low` |  |
 | `model` | string | Yes | — | Model |
-| `num_ctx` | integer / null | No | `null` | Num Ctx |
 | `pr_labels` | boolean | No | `False` | Pr Labels |
 | `preset` | `fast` / `full` | No | `fast` |  |
 | `project` | ProjectProfile | No | — |  |
 | `provider` | `anthropic` / `azure` / `bedrock` / `chatgpt` / `ollama` / `openai` / `openai-compatible` / `openrouter` / `vertex` / `zai` | Yes | — |  |
-| `reasoning_effort` | string / null | No | `null` | Reasoning Effort |
-| `recursive` | boolean | No | `True` | Recursive |
 | `reflect` | boolean | No | `True` | Reflect |
 | `reflect_model` | string / null | No | `null` | Reflect Model |
 | `repair_unparseable` | boolean | No | `True` | Repair Unparseable |
+| `request` | RequestConfig | No | `{'timeout': None, 'temperature': 0.0, 'max_tokens': None, 'reasoning_effort': None, 'num_ctx': None}` |  |
 | `resolve_fixed` | boolean | No | `True` | Resolve Fixed |
 | `retry_without_schema` | boolean | No | `True` | Retry Without Schema |
 | `risk` | RiskConfig | No | `{'enabled': True, 'core_paths': []}` |  |
@@ -7428,10 +7421,50 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `structured_output` | boolean | No | `True` | Structured Output |
 | `summary_template` | string / null | No | `null` | Summary Template |
 | `symbol_resolution` | boolean | No | `True` | Symbol Resolution |
-| `temperature` | number | No | `0.0` | Temperature |
-| `timeout` | integer / null | No | `null` | Timeout |
 | `triage_model` | string / null | No | `null` | Triage Model |
 | `unanchored_min_severity` | `critical` / `high` / `info` / `low` / `medium` | No | `high` |  |
+
+### Grouped settings
+
+Settings one stage reads together sit in a group. Set each key flat at the top level, as before, or under its group. Both forms load the same config. Setting one key both ways is an error.
+
+```yaml
+max_input_tokens: 40000      # flat
+batching:
+  context_lines: 5           # nested
+```
+
+#### `batching`
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `context_lines` | integer | No | `20` | Context Lines |
+| `exclude_paths` | list[string] | No | `[]` | Exclude Paths |
+| `function_context` | boolean | No | `True` | Function Context |
+| `include_paths` | list[string] | No | `[]` | Include Paths |
+| `max_file_diff_lines` | integer | No | `2000` | Max File Diff Lines |
+| `max_files` | integer | No | `50` | Max Files |
+| `max_input_tokens` | integer | No | `100000` | Max Input Tokens |
+| `recursive` | boolean | No | `True` | Recursive |
+
+#### `limits`
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `max_concurrency` | integer / null | No | `null` | Max Concurrency |
+| `max_findings_per_lens` | integer | No | `50` | Max Findings Per Lens |
+| `max_review_seconds` | integer | No | `3600` | Max Review Seconds |
+| `max_review_tokens` | integer | No | `0` | Max Review Tokens |
+
+#### `request`
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `max_tokens` | integer / null | No | `null` | Max Tokens |
+| `num_ctx` | integer / null | No | `null` | Num Ctx |
+| `reasoning_effort` | string / null | No | `null` | Reasoning Effort |
+| `temperature` | number | No | `0.0` | Temperature |
+| `timeout` | integer / null | No | `null` | Timeout |
 
 ## Enums
 
@@ -7531,6 +7564,59 @@ The canonical machine-readable schemas. These are the source of truth for provid
 ```json
 {
   "$defs": {
+    "BatchingConfig": {
+      "additionalProperties": false,
+      "description": "How the diff becomes model calls: which files, how much of each, how much\ncontext around a hunk, and the per-call input budget.\n\nRead by the preparation stages that filter, cap, expand and split the diff,\nand wherever a later pass sizes its own prompt against ``max_input_tokens``.\nEach key can also be set flat at the top level of the config (see\n``ReviewConfig``).",
+      "properties": {
+        "context_lines": {
+          "default": 20,
+          "title": "Context Lines",
+          "type": "integer"
+        },
+        "exclude_paths": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Exclude Paths",
+          "type": "array"
+        },
+        "function_context": {
+          "default": true,
+          "title": "Function Context",
+          "type": "boolean"
+        },
+        "include_paths": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Include Paths",
+          "type": "array"
+        },
+        "max_file_diff_lines": {
+          "default": 2000,
+          "minimum": 0,
+          "title": "Max File Diff Lines",
+          "type": "integer"
+        },
+        "max_files": {
+          "default": 50,
+          "title": "Max Files",
+          "type": "integer"
+        },
+        "max_input_tokens": {
+          "default": 100000,
+          "title": "Max Input Tokens",
+          "type": "integer"
+        },
+        "recursive": {
+          "default": true,
+          "title": "Recursive",
+          "type": "boolean"
+        }
+      },
+      "title": "BatchingConfig",
+      "type": "object"
+    },
     "CustomLens": {
       "additionalProperties": false,
       "description": "A user-defined review lens \u2014 a \"skill file\" run alongside the built-ins.\n\nThe engine fans it out as its own focused LLM call (same pipeline as a\nbuilt-in ``ReviewCategory``) and merges its findings with the rest. A lens is\ndeclared in **trusted** config (``.lgtmaybe.yml`` or a file referenced by\n``lens_paths``), never from PR-author content, so its text is safe to put in\nthe system prompt. Supplying a worked example (``example_diff`` +\n``example_finding``) is optional but sharply improves a small model's output.",
@@ -7708,6 +7794,45 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "title": "FindingRuleMatch",
       "type": "object"
     },
+    "LimitsConfig": {
+      "additionalProperties": false,
+      "description": "Whole-run ceilings: wall clock, billable tokens, findings per call, and\nhow many calls run at once.\n\nRead by the run state every call shares and by the fan-out pool. Each key\ncan also be set flat at the top level of the config.",
+      "properties": {
+        "max_concurrency": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Concurrency"
+        },
+        "max_findings_per_lens": {
+          "default": 50,
+          "minimum": 0,
+          "title": "Max Findings Per Lens",
+          "type": "integer"
+        },
+        "max_review_seconds": {
+          "default": 3600,
+          "minimum": 0,
+          "title": "Max Review Seconds",
+          "type": "integer"
+        },
+        "max_review_tokens": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Max Review Tokens",
+          "type": "integer"
+        }
+      },
+      "title": "LimitsConfig",
+      "type": "object"
+    },
     "ProjectProfile": {
       "additionalProperties": false,
       "description": "What the repository is, so a review can be calibrated to the workload.\n\nA weekend prototype and a regulated payments service should not get the\nsame review. ``stage`` sets defaults for existing settings (a prototype\nraises the ``min_severity`` default to ``medium``; a regulated workload\nfloors the risk verdict of any change that isn't only docs and tests at\n``medium``), and an explicitly configured setting always wins. All three\nfields also render one short trusted paragraph in the shared review\npreamble. Empty (the default) is byte-identical to a review without the\nfeature.\n\nStructured on purpose: reading AGENTS.md or similar wholesale brings\ncoding-agent instructions the reviewer has no use for, and usually more\ntext than the context budget takes.",
@@ -7768,6 +7893,77 @@ The canonical machine-readable schemas. These are the source of truth for provid
       ],
       "title": "Provider",
       "type": "string"
+    },
+    "RequestConfig": {
+      "additionalProperties": false,
+      "description": "How each completion request is shaped: its timeout, sampling, output and\nreasoning budget, and ollama's context window.\n\nRead only where the provider client is built. Each key can also be set flat\nat the top level of the config.",
+      "properties": {
+        "max_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Tokens"
+        },
+        "num_ctx": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Num Ctx"
+        },
+        "reasoning_effort": {
+          "anyOf": [
+            {
+              "enum": [
+                "none",
+                "minimal",
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "default"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reasoning Effort"
+        },
+        "temperature": {
+          "default": 0.0,
+          "title": "Temperature",
+          "type": "number"
+        },
+        "timeout": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timeout"
+        }
+      },
+      "title": "RequestConfig",
+      "type": "object"
     },
     "ReviewCategory": {
       "description": "A single review lens. The engine asks for each one in its own LLM call.\n\n``intent`` checks the diff against the PR's stated intent (title, description,\ncommit messages); it only runs when the context carries some stated intent.\n``ponytail`` is the \"lazy senior dev\" lens \u2014 the best code is the code you\nnever wrote \u2014 flagging code that needn't exist at all (YAGNI, reach for the\nstandard library, do it in fewer lines).\n``architecture`` flags design decisions the diff introduces that are\nexpensive to reverse \u2014 coupling across boundaries, dependency direction,\nbroken substitutability, misuse-prone public surface \u2014 each tied to a\nconcrete change scenario.\n``spec`` checks the diff against a specification the repository commits\n(OpenSpec, GitHub Spec Kit, Kiro); like ``intent`` it only runs when there is\nsomething to check against \u2014 here, a detected spec that matches the PR.",
@@ -8048,7 +8244,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
     }
   },
   "additionalProperties": false,
-  "description": "How to run one review: provider/model, severity floor, filters, caps.",
+  "description": "How to run one review: provider/model, severity floor, filters, caps.\n\nSettings one stage reads together live in a group (``batching``, ``limits``,\n``request``, like ``static_analysis`` and ``risk``), so a reader names the\ngroup it depends on: ``cfg.batching.max_input_tokens``. Every surface that\nsets config still speaks the flat keys (``max_input_tokens: 40000`` in\n``.lgtmaybe.yml``, ``lgtmaybe config set``, CLI flags, Action inputs,\n``ReviewConfig(max_input_tokens=...)``): ``_lift_groups`` moves each into\nits group before validation. ``flat_fields`` is that flat key set.",
   "properties": {
     "api_base": {
       "anyOf": [
@@ -8072,6 +8268,19 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "title": "Auto Diagram",
       "type": "boolean"
     },
+    "batching": {
+      "$ref": "#/$defs/BatchingConfig",
+      "default": {
+        "context_lines": 20,
+        "exclude_paths": [],
+        "function_context": true,
+        "include_paths": [],
+        "max_file_diff_lines": 2000,
+        "max_files": 50,
+        "max_input_tokens": 100000,
+        "recursive": true
+      }
+    },
     "categories": {
       "default": [
         "security",
@@ -8092,23 +8301,11 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "title": "Categories",
       "type": "array"
     },
-    "context_lines": {
-      "default": 20,
-      "title": "Context Lines",
-      "type": "integer"
-    },
     "directory_rules": {
       "items": {
         "$ref": "#/$defs/DirectoryRule"
       },
       "title": "Directory Rules",
-      "type": "array"
-    },
-    "exclude_paths": {
-      "items": {
-        "type": "string"
-      },
-      "title": "Exclude Paths",
       "type": "array"
     },
     "extra_lenses": {
@@ -8148,11 +8345,6 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "title": "Finding Rules",
       "type": "array"
     },
-    "function_context": {
-      "default": true,
-      "title": "Function Context",
-      "type": "boolean"
-    },
     "high_impact": {
       "default": true,
       "title": "High Impact",
@@ -8163,13 +8355,6 @@ The canonical machine-readable schemas. These are the source of truth for provid
         "type": "string"
       },
       "title": "Ignore Fingerprints",
-      "type": "array"
-    },
-    "include_paths": {
-      "items": {
-        "type": "string"
-      },
-      "title": "Include Paths",
       "type": "array"
     },
     "incremental": {
@@ -8201,65 +8386,14 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "title": "Learn Feedback",
       "type": "boolean"
     },
-    "max_concurrency": {
-      "anyOf": [
-        {
-          "minimum": 1,
-          "type": "integer"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Max Concurrency"
-    },
-    "max_file_diff_lines": {
-      "default": 2000,
-      "minimum": 0,
-      "title": "Max File Diff Lines",
-      "type": "integer"
-    },
-    "max_files": {
-      "default": 50,
-      "title": "Max Files",
-      "type": "integer"
-    },
-    "max_findings_per_lens": {
-      "default": 50,
-      "minimum": 0,
-      "title": "Max Findings Per Lens",
-      "type": "integer"
-    },
-    "max_input_tokens": {
-      "default": 100000,
-      "title": "Max Input Tokens",
-      "type": "integer"
-    },
-    "max_review_seconds": {
-      "default": 3600,
-      "minimum": 0,
-      "title": "Max Review Seconds",
-      "type": "integer"
-    },
-    "max_review_tokens": {
-      "default": 0,
-      "minimum": 0,
-      "title": "Max Review Tokens",
-      "type": "integer"
-    },
-    "max_tokens": {
-      "anyOf": [
-        {
-          "minimum": 0,
-          "type": "integer"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Max Tokens"
+    "limits": {
+      "$ref": "#/$defs/LimitsConfig",
+      "default": {
+        "max_concurrency": null,
+        "max_findings_per_lens": 50,
+        "max_review_seconds": 3600,
+        "max_review_tokens": 0
+      }
     },
     "mid_review_retrieval": {
       "default": false,
@@ -8281,18 +8415,6 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "title": "Model",
       "type": "string"
     },
-    "num_ctx": {
-      "anyOf": [
-        {
-          "type": "integer"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Num Ctx"
-    },
     "pr_labels": {
       "default": false,
       "title": "Pr Labels",
@@ -8307,32 +8429,6 @@ The canonical machine-readable schemas. These are the source of truth for provid
     },
     "provider": {
       "$ref": "#/$defs/Provider"
-    },
-    "reasoning_effort": {
-      "anyOf": [
-        {
-          "enum": [
-            "none",
-            "minimal",
-            "low",
-            "medium",
-            "high",
-            "xhigh",
-            "default"
-          ],
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Reasoning Effort"
-    },
-    "recursive": {
-      "default": true,
-      "title": "Recursive",
-      "type": "boolean"
     },
     "reflect": {
       "default": true,
@@ -8355,6 +8451,16 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "default": true,
       "title": "Repair Unparseable",
       "type": "boolean"
+    },
+    "request": {
+      "$ref": "#/$defs/RequestConfig",
+      "default": {
+        "max_tokens": null,
+        "num_ctx": null,
+        "reasoning_effort": null,
+        "temperature": 0.0,
+        "timeout": null
+      }
     },
     "resolve_fixed": {
       "default": true,
@@ -8427,23 +8533,6 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "default": true,
       "title": "Symbol Resolution",
       "type": "boolean"
-    },
-    "temperature": {
-      "default": 0.0,
-      "title": "Temperature",
-      "type": "number"
-    },
-    "timeout": {
-      "anyOf": [
-        {
-          "type": "integer"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Timeout"
     },
     "triage_model": {
       "anyOf": [

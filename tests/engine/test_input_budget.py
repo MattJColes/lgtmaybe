@@ -132,6 +132,23 @@ def test_a_configured_budget_is_the_users_call() -> None:
     assert provider.calls == 1
 
 
+def test_a_budget_configured_under_its_group_is_the_users_call_too() -> None:
+    """The nested form marks the budget configured just as the flat key does."""
+    provider = _Counting(budget=_one_file_fits_two_do_not())
+    LLMReviewEngine(provider).review(_ctx(), _cfg(batching={"max_input_tokens": 100_000}))
+    assert provider.calls == 1
+
+
+def test_a_sibling_batching_key_leaves_the_budget_defaulted() -> None:
+    """`_cfg` always sets `context_lines` (the same group); the budget is still a
+    default, so it is still fitted to the model."""
+    provider = _Counting(budget=_one_file_fits_two_do_not())
+    cfg = _cfg()
+    assert "context_lines" in cfg.batching.model_fields_set
+    LLMReviewEngine(provider).review(_ctx(), cfg)
+    assert provider.calls == 2
+
+
 def test_a_provider_with_no_opinion_changes_nothing() -> None:
     provider = _Counting(budget=None)
     LLMReviewEngine(provider).review(_ctx(), _cfg())

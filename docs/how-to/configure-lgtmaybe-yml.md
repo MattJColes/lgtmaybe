@@ -78,6 +78,11 @@ lists every field with its type and default, including the tuning knobs not
 described here (`max_tokens`, `reasoning_effort`, `temperature`, `language`,
 `fail_on`, `max_review_seconds`, `max_review_tokens` and others).
 
+Every key on this page is a top-level key. Some also belong to a group
+(`batching`, `limits` or `request`), and you may nest them under it instead.
+Both forms load the same config, so existing files need no change. The
+reference lists each group's keys.
+
 ### provider
 
 Which LLM backend, or [provider](../reference/glossary.md#provider), to use. One of `openai`, `openrouter`, `anthropic`, `zai`,

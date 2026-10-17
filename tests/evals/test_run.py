@@ -301,7 +301,7 @@ def test_max_input_tokens_threads_to_review_config(monkeypatch: pytest.MonkeyPat
     real_review = run_mod.LLMReviewEngine.review
 
     def spy_review(self, ctx, cfg):  # type: ignore[no-untyped-def]
-        seen.append(cfg.max_input_tokens)
+        seen.append(cfg.batching.max_input_tokens)
         return real_review(self, ctx, cfg)
 
     monkeypatch.setattr(run_mod, "build_provider", lambda *a, **k: _ShellInjectionProvider())
@@ -324,12 +324,12 @@ def test_max_input_tokens_threads_to_review_config(monkeypatch: pytest.MonkeyPat
 
 
 def _capture_recursive(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> list[bool]:
-    """Run main with *argv* and return the cfg.recursive seen by the engine."""
+    """Run main with *argv* and return the cfg.batching.recursive seen by the engine."""
     seen: list[bool] = []
     real_review = run_mod.LLMReviewEngine.review
 
     def spy_review(self, ctx, cfg):  # type: ignore[no-untyped-def]
-        seen.append(cfg.recursive)
+        seen.append(cfg.batching.recursive)
         return real_review(self, ctx, cfg)
 
     monkeypatch.setattr(run_mod, "build_provider", lambda *a, **k: _ShellInjectionProvider())
@@ -543,7 +543,7 @@ def test_review_deadline_is_disabled_for_evals(monkeypatch: pytest.MonkeyPatch) 
     on a slow local model it would skip calls mid-fixture and silently melt the
     recall the run exists to measure."""
     seen = _capture_cfg(monkeypatch, [*_BASE_ARGV, "--fixture", "badcode"])
-    assert seen and all(cfg.max_review_seconds == 0 for cfg in seen)
+    assert seen and all(cfg.limits.max_review_seconds == 0 for cfg in seen)
 
 
 def test_preset_flag_threads_to_review_config(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -363,7 +363,9 @@ def test_the_dogfood_config_is_valid_and_fits_this_repo() -> None:
     )
 
     def reviewed(path: str) -> bool:
-        return passes_path_filters(path, include=config.include_paths, exclude=config.exclude_paths)
+        return passes_path_filters(
+            path, include=config.batching.include_paths, exclude=config.batching.exclude_paths
+        )
 
     # Planted bugs, generated snapshots, and the release-please changelog.
     for path in (

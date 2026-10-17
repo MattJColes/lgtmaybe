@@ -65,7 +65,10 @@ class TestModelCallBudgets:
         """The soft whole-review deadline must stay at least 2× the most generous
         per-call budget, so one slow gateway/local call can never eat the run."""
         slowest = max(default_timeout_for(p) for p in Provider)
-        assert ReviewConfig(provider=Provider.openai, model="m").max_review_seconds >= 2 * slowest
+        assert (
+            ReviewConfig(provider=Provider.openai, model="m").limits.max_review_seconds
+            >= 2 * slowest
+        )
 
 
 class TestDocumentedProviderDefaults:

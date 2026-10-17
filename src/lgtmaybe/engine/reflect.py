@@ -286,7 +286,9 @@ def reflect_findings(
             deferred_needs,
             fetch_file,
             already=grounded_paths,
-            budget_tokens=max(0, cfg.max_input_tokens // 4),  # 1/4 of input budget per fetch hop
+            budget_tokens=max(
+                0, cfg.batching.max_input_tokens // 4
+            ),  # 1/4 of input budget per fetch hop
             max_files=MAX_FETCH_FILES,
             resolve_symbol=resolve_symbol,
         )
@@ -381,7 +383,7 @@ def _audit(
         + count_tokens(hint_block)
         + scaffold_tokens
     )
-    room = cfg.max_input_tokens - overhead
+    room = cfg.batching.max_input_tokens - overhead
     diff, trimmed = _budgeted_diff(findings, ctx, room)
     if trimmed:
         _log.info(
@@ -395,12 +397,12 @@ def _audit(
     # gets the full (redacted) head text of every file carrying a surviving
     # finding so it can verify a whole-file claim — that an import/symbol IS
     # present, that a duplicate isn't real — instead of guessing about unseen code.
-    reserve = cfg.max_input_tokens - count_tokens(diff) - overhead
+    reserve = cfg.batching.max_input_tokens - count_tokens(diff) - overhead
     if cfg.preset is ReviewPreset.fast:
         # The everyday path trades some grounding depth for a faster, cheaper
         # audit: cap the head-text budget at a quarter of the input budget
         # (the full preset still hands the auditor everything that fits).
-        reserve = min(reserve, cfg.max_input_tokens // 4)
+        reserve = min(reserve, cfg.batching.max_input_tokens // 4)
     grounding, grounded_paths = _grounding_block(findings, ctx, reserve, extra_paths=fetched_paths)
 
     # The diff is attacker-controlled on a fork PR, exactly as it is on the

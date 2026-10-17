@@ -280,7 +280,7 @@ class TestMcpCommand:
         assert result.output == ""  # nothing on stdout before the transport starts
         assert Path.cwd().samefile(tmp_path)
         cfg = served[0].load_config()
-        assert (cfg.provider.value, cfg.model, cfg.timeout) == ("ollama", "qwen3:27b", 900)
+        assert (cfg.provider.value, cfg.model, cfg.request.timeout) == ("ollama", "qwen3:27b", 900)
 
 
 class TestServeLifecycle:

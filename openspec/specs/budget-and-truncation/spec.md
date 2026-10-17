@@ -26,8 +26,10 @@ fit is only ever downward — the default is also a spend ceiling. Without it a
 - **THEN** batches are built against the reported budget, and the fit is logged
 
 #### Scenario: the user set a budget
-- **WHEN** `max_input_tokens` is configured, even above what the provider reports
-- **THEN** the configured value is used unchanged
+- **WHEN** `max_input_tokens` is configured (flat or under `batching`), even above
+  what the provider reports
+- **THEN** the configured value is used unchanged, while setting only another
+  `batching` key leaves the budget defaulted and fitted
 
 ### Requirement: Over-budget files walk hunk-by-hunk
 
