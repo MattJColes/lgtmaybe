@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.15.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.15.0...lgtmaybe-v2.15.1) (2026-10-17)
+
+
+### Bug Fixes
+
+* **ci:** pin the tap checkout branch so it skips the REST API ([#855](https://github.com/MattJColes/lgtmaybe/issues/855)) ([8ff6b12](https://github.com/MattJColes/lgtmaybe/commit/8ff6b12a00e206cf9d74f55a5731a969ff9a4fe2))
+
 ## [2.15.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.14.0...lgtmaybe-v2.15.0) (2026-10-17)
 
 
