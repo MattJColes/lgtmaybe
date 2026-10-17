@@ -15,8 +15,10 @@ import pytest
 
 from lgtmaybe.core.models import (
     PRContext,
+    PRStack,
     ReviewCategory,
     Severity,
+    StackLayer,
     StaticAnalysisConfig,
     StaticAnalysisTool,
     ToolMode,
@@ -90,6 +92,26 @@ class TestRedactInputs:
 
     def test_no_stated_intent_is_none(self) -> None:
         assert stages.redact_inputs(_ctx()).intent is None
+
+    def test_every_stack_field_is_redacted_before_egress(self) -> None:
+        """The stack rides the shared prefix of every call, so each title, path
+        and ref in it leaves the process like the diff does."""
+        secret = "AKIAIOSFODNN7EXAMPLE"
+        stack = PRStack(
+            position=2,
+            size=3,
+            base_ref=f"release/{secret}",
+            below=[StackLayer(number=10, title=f"Below {secret}", files=[f"below/{secret}.py"])],
+            above=[StackLayer(number=12, title=f"Above {secret}", files=[f"above/{secret}.py"])],
+        )
+
+        clean = stages._redacted_stack(stack)
+
+        assert clean is not None
+        assert secret not in clean.model_dump_json()
+        assert clean.base_ref.startswith("release/")
+        assert [layer.number for layer in clean.below + clean.above] == [10, 12]
+        assert stages._redacted_stack(None) is None
 
 
 def test_spec_context_is_skipped_when_spec_review_is_off(tmp_path: Path) -> None:
