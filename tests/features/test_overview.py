@@ -26,9 +26,6 @@ from typing import Any
 import pytest
 
 from lgtmaybe.core.models import (
-    DescribeResult,
-    DiagramResult,
-    HighImpactResult,
     PRContext,
     Provider,
     ProviderResult,
@@ -38,6 +35,7 @@ from lgtmaybe.core.models import (
     RiskReason,
 )
 from lgtmaybe.core.ports import Message
+from lgtmaybe.core.schemas import DescribeResult, DiagramResult, HighImpactResult
 from lgtmaybe.features.diagram import build_diagram
 from lgtmaybe.features.overview import build_overview
 from tests.fakes import FakeProvider

@@ -21,13 +21,8 @@ import json
 
 import pytest
 
-from lgtmaybe.core.models import (
-    HighImpactResult,
-    PRContext,
-    Provider,
-    ProviderResult,
-    ReviewConfig,
-)
+from lgtmaybe.core.models import PRContext, Provider, ProviderResult, ReviewConfig
+from lgtmaybe.core.schemas import HighImpactResult
 from lgtmaybe.engine.impact_areas import path_signals
 from lgtmaybe.features.high_impact import (
     HIGH_IMPACT_HEADING,

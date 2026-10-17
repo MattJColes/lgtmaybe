@@ -20,16 +20,13 @@ import pytest
 
 from lgtmaybe.cli.render import _render_agent
 from lgtmaybe.core.comment import finding_bullet, render_broad, render_demoted
-from lgtmaybe.core.models import (
+from lgtmaybe.core.models import Provider, ReviewConfig, ReviewFinding, Severity
+from lgtmaybe.core.schemas import (
     DiagramNode,
     DiagramResult,
     DiagramStep,
     HighImpactArea,
     HighImpactResult,
-    Provider,
-    ReviewConfig,
-    ReviewFinding,
-    Severity,
 )
 from lgtmaybe.engine.notices import _SCHEMA_DROP_NOTE, _build_notices, _NoticeState
 from lgtmaybe.engine.parse import ParseError, parse_findings

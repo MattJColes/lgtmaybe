@@ -215,7 +215,7 @@ class TestModelProseIsInert:
     model must not be able to restructure the comment around them."""
 
     def _described(self, **fields: str) -> str:
-        from lgtmaybe.core.models import DescribeResult
+        from lgtmaybe.core.schemas import DescribeResult
         from lgtmaybe.features.describe import render_description
 
         base = {"title": "t", "change_type": "fix", "summary": "s", "intent_check": "i"}
@@ -244,7 +244,7 @@ class TestModelProseIsInert:
         assert "\n## Fake heading" not in body
 
     def test_a_walkthrough_cell_cannot_break_the_table(self) -> None:
-        from lgtmaybe.core.models import DescribeResult, FileWalkthrough
+        from lgtmaybe.core.schemas import DescribeResult, FileWalkthrough
         from lgtmaybe.features.describe import render_description
 
         body = render_description(

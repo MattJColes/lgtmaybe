@@ -16,8 +16,9 @@ import json
 from dataclasses import dataclass
 from enum import StrEnum
 
-from lgtmaybe.core.models import AnswerResult, ReviewConfig
+from lgtmaybe.core.models import ReviewConfig
 from lgtmaybe.core.ports import GitHubGateway, ProviderClient, ReviewEngine
+from lgtmaybe.core.schemas import AnswerResult
 from lgtmaybe.engine.injection import wrap_diff_for_question
 from lgtmaybe.engine.parse import parse_structured
 from lgtmaybe.engine.redact import redact

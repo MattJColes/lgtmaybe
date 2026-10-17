@@ -486,7 +486,7 @@ def test_overview_sections_are_on_by_default() -> None:
 def test_high_impact_area_rejects_an_unknown_area() -> None:
     """The taxonomy is a closed set — a model inventing an area is drifted
     output, and _Strict rejects it rather than rendering an unknown heading."""
-    from lgtmaybe.core.models import HighImpactArea
+    from lgtmaybe.core.schemas import HighImpactArea
 
     with pytest.raises(ValidationError):
         HighImpactArea(area="vibes", title="t")
@@ -498,7 +498,7 @@ def test_high_impact_area_rejects_an_unknown_area() -> None:
 
 def test_high_impact_result_defaults_to_no_areas() -> None:
     """An empty answer must be expressible: "nothing qualifies" is a result."""
-    from lgtmaybe.core.models import HighImpactResult
+    from lgtmaybe.core.schemas import HighImpactResult
 
     assert HighImpactResult.model_validate({"areas": []}).areas == []
 
@@ -602,3 +602,29 @@ def test_a_refused_degradation_stamp_does_not_cost_the_other() -> None:
     stamp_degradation(exc, schema_dropped=True, temperature_dropped=True)
     assert not schema_dropped_on(exc)
     assert temperature_dropped_on(exc)
+
+
+def test_model_output_schemas_live_in_core_schemas_not_models() -> None:
+    """The auxiliary passes' output envelopes are their own module (#836):
+    core.models holds how a review runs and what a forge sends, not what a
+    describe/diagram/high-impact/triage/answer call must return."""
+    import lgtmaybe.core.models as models
+    import lgtmaybe.core.schemas as schemas
+
+    moved = [
+        "AnswerResult",
+        "DescribeResult",
+        "DiagramEdge",
+        "DiagramNode",
+        "DiagramResult",
+        "DiagramStep",
+        "FileWalkthrough",
+        "HighImpactArea",
+        "HighImpactKind",
+        "HighImpactResult",
+        "TriageFileVerdict",
+        "TriageResult",
+    ]
+    for name in moved:
+        assert hasattr(schemas, name), name
+        assert not hasattr(models, name), name

@@ -28,8 +28,9 @@ from typing import get_args
 
 from lgtmaybe.core.comment import code_span
 from lgtmaybe.core.logging import get_logger
-from lgtmaybe.core.models import HighImpactKind, HighImpactResult, PRContext, ReviewConfig
+from lgtmaybe.core.models import PRContext, ReviewConfig
 from lgtmaybe.core.ports import ProviderClient
+from lgtmaybe.core.schemas import HighImpactKind, HighImpactResult
 from lgtmaybe.engine.impact_areas import AREA_LABELS, path_signals
 from lgtmaybe.engine.injection import wrap_path_signals
 from lgtmaybe.engine.prompt import PLAIN_LANGUAGE, language_directive

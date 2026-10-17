@@ -479,7 +479,7 @@ def test_run_diagram_posts_via_the_idempotent_upsert() -> None:
             "notes": "",
         }
     )
-    from lgtmaybe.core.models import DescribeResult, DiagramResult, HighImpactResult
+    from lgtmaybe.core.schemas import DescribeResult, DiagramResult, HighImpactResult
 
     # Routed by schema: one canned result would feed the diagram payload to the
     # describe call too, whose lenient "has a title" predicate accepts it.
