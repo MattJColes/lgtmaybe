@@ -31,6 +31,19 @@ def test_homebrew_workflow_targets_the_tap_repo() -> None:
     assert "homebrew-lgtmaybe" not in text
 
 
+def test_homebrew_tap_checkout_names_its_branch() -> None:
+    """Without a ref, checkout asks the REST API for the default branch.
+
+    That call spends the HOMEBREW_TAP_TOKEN owner's hourly quota, and a release
+    failed when the quota ran out. Naming the branch makes the checkout a plain
+    git fetch.
+    """
+    _text, workflow = read_workflow("homebrew.yml")
+    steps = {step["name"]: step for step in workflow["jobs"]["formula"]["steps"]}
+
+    assert steps["Checkout the tap"]["with"]["ref"] == "main"
+
+
 def test_homebrew_smoke_test_installs_the_generated_formula() -> None:
     _text, workflow = read_workflow("homebrew.yml")
     steps = {step["name"]: step for step in workflow["jobs"]["formula"]["steps"]}

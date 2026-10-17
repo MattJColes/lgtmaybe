@@ -73,6 +73,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: MattJColes/homebrew-tap
+          # Without a ref, checkout asks the REST API for the default branch,
+          # spending the PAT owner's hourly quota; a release failed on it.
+          ref: main
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: tap
 
