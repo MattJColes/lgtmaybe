@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
@@ -17,6 +18,17 @@ from lgtmaybe.providers.factory import (
     resolve_max_tokens,
 )
 from lgtmaybe.providers.litellm_provider import LiteLLMProvider
+
+
+class _RecordingHandler(logging.Handler):
+    """Keeps every record it is handed, for a logger that does not propagate."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
 
 
 def _one_call(built: LiteLLMProvider) -> ProviderResult:
@@ -346,14 +358,37 @@ class TestParamSupport:
         assert dropped_params(Provider.ollama, "llama2", ["num_ctx", "think"]) == []
 
 
+def _stub_effort_support(monkeypatch: pytest.MonkeyPatch, *, forwarded: bool) -> None:
+    """Pin whether litellm's openrouter route lists ``reasoning_effort``.
+
+    litellm 1.105 started listing it for every openrouter model; the declared
+    floor predates that and lists it only for mapped reasoning models. Both are
+    supported installs, so each branch is tested against a stubbed map rather
+    than whichever litellm happens to be locked.
+    """
+    import litellm
+
+    real = litellm.get_supported_openai_params
+
+    def stubbed(**kw: Any) -> list[str]:
+        listed = [name for name in (real(**kw) or []) if name != "reasoning_effort"]
+        return [*listed, "reasoning_effort"] if forwarded else listed
+
+    monkeypatch.setattr(litellm, "get_supported_openai_params", stubbed)
+
+
 class TestOpenRouterReasoning:
     """OpenRouter's native ``reasoning`` field, for models litellm's map misses."""
 
-    def test_unmapped_model_gets_the_native_reasoning_field(self) -> None:
-        """litellm only forwards ``reasoning_effort`` on openrouter for a model
-        its capability map flags reasoning-capable — which the newest models are
-        not. Those are exactly the models a reasoning budget gets set for, so the
-        budget goes out in OpenRouter's own top-level ``reasoning`` object."""
+    def test_unmapped_model_gets_the_native_reasoning_field(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Before 1.105, litellm only forwards ``reasoning_effort`` on openrouter
+        for a model its capability map flags reasoning-capable — which the newest
+        models are not. Those are exactly the models a reasoning budget gets set
+        for, so the budget goes out in OpenRouter's own top-level ``reasoning``
+        object."""
+        _stub_effort_support(monkeypatch, forwarded=False)
         built = build_provider(Provider.openrouter, "vendor/unmapped-model", reasoning_effort="low")
 
         assert built.default_opts["extra_body"] == {"reasoning": {"effort": "low"}}
@@ -364,17 +399,8 @@ class TestOpenRouterReasoning:
     ) -> None:
         """OpenRouter rejects a request carrying BOTH fields with ``400 Only one
         of "reasoning" and "reasoning_effort" may be provided`` — so when litellm
-        will forward the flat param itself, nothing may be injected beside it.
-        The capability map is stubbed here so the guarantee does not depend on a
-        particular model staying in litellm's map across a dependency bump."""
-        import litellm
-
-        real = litellm.get_supported_openai_params
-        monkeypatch.setattr(
-            litellm,
-            "get_supported_openai_params",
-            lambda **kw: [*(real(**kw) or []), "reasoning_effort"],
-        )
+        will forward the flat param itself, nothing may be injected beside it."""
+        _stub_effort_support(monkeypatch, forwarded=True)
         built = build_provider(
             Provider.openrouter, "vendor/reasoning-model", reasoning_effort="low"
         )
@@ -382,27 +408,36 @@ class TestOpenRouterReasoning:
         assert built.default_opts.get("reasoning_effort") == "low"
         assert "extra_body" not in built.default_opts
 
+    @pytest.mark.parametrize("forwarded", [False, True], ids=["dropped", "forwarded"])
     def test_a_value_with_no_native_equivalent_is_reported_not_translated(
-        self, caplog: pytest.LogCaptureFixture
+        self, forwarded: bool, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ) -> None:
         """``default`` is in litellm's normalised set but not in OpenRouter's
         ``reasoning.effort`` enum (none/minimal/low/medium/high/xhigh). Sending a
-        nearby value instead would quietly buy a budget nobody asked for."""
+        nearby value instead would quietly buy a budget nobody asked for, and
+        sending it as-is (what litellm does once it forwards the flat param)
+        sends a value the route does not define. Either way it is withheld and
+        named."""
+        _stub_effort_support(monkeypatch, forwarded=forwarded)
         with caplog.at_level(logging.WARNING, logger="lgtmaybe.providers.factory"):
             built = build_provider(
                 Provider.openrouter, "vendor/unmapped-model", reasoning_effort="default"
             )
 
         assert "extra_body" not in built.default_opts
+        assert "reasoning_effort" not in built.default_opts
         assert any("reasoning_effort" in str(record.__dict__) for record in caplog.records)
 
-    def test_the_native_field_survives_litellms_own_transformation(self) -> None:
+    def test_the_native_field_survives_litellms_own_transformation(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """One layer past our own kwargs: litellm's openrouter transformation
         assigns its own `extra_body` (for `transforms`/`models`/`route`), so a
         bump that made that assignment clobber rather than merge would put us
         back where we started — a budget that looks sent and never leaves."""
         import litellm
 
+        _stub_effort_support(monkeypatch, forwarded=False)
         built = build_provider(Provider.openrouter, "vendor/unmapped-model", reasoning_effort="low")
         outbound = litellm.get_optional_params(
             model="vendor/unmapped-model",
@@ -562,7 +597,9 @@ class TestOutputCeiling:
         assert "max_tokens" not in provider.default_opts
 
 
-def test_build_provider_tells_the_adapter_whether_the_route_takes_an_effort() -> None:
+def test_build_provider_tells_the_adapter_whether_the_route_takes_an_effort(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The capability answer lives in the factory — it holds the Provider enum and
     the raw model name that `dropped_params` needs, and the adapter holds neither.
 
@@ -570,20 +607,16 @@ def test_build_provider_tells_the_adapter_whether_the_route_takes_an_effort() ->
     incapable, because litellm's map does not know the newest models."""
     from lgtmaybe.providers import factory as factory_mod
 
-    seen: dict[str, object] = {}
+    seen: dict[str, list[str]] = {}
 
-    def fake_dropped(_provider: object, _model: str, params: object) -> list[str]:
-        seen["params"] = list(params)  # type: ignore[arg-type]
+    def fake_dropped(_provider: Provider, _model: str, params: Iterable[str]) -> list[str]:
+        seen["params"] = list(params)
         return ["reasoning_effort"]
 
-    original = factory_mod.dropped_params
-    factory_mod.dropped_params = fake_dropped  # type: ignore[assignment]
-    try:
-        provider = build_provider(Provider.openai, "gpt-5.5", api_key="k")
-    finally:
-        factory_mod.dropped_params = original  # type: ignore[assignment]
+    monkeypatch.setattr(factory_mod, "dropped_params", fake_dropped)
+    provider = build_provider(Provider.openai, "gpt-5.5", api_key="k")
 
-    assert "reasoning_effort" in seen["params"]  # type: ignore[operator]
+    assert "reasoning_effort" in seen["params"]
     assert provider._effort_override_supported is False
 
 
@@ -838,9 +871,8 @@ class TestInputBudget:
         built = build_provider(Provider.ollama, "qwen3:8b", num_ctx=num_ctx)
         assert built.default_opts["max_tokens"] >= num_ctx
 
-        records: list[logging.LogRecord] = []
-        handler = logging.Handler()
-        handler.emit = records.append  # type: ignore[method-assign]
+        handler = _RecordingHandler()
+        records = handler.records
         litellm_provider._log.addHandler(handler)
         try:
             budget = built.input_budget()
@@ -851,8 +883,8 @@ class TestInputBudget:
         assert 0 < budget <= num_ctx
         warning = next(r for r in records if "max_tokens" in r.getMessage())
         # The numbers ride as fields JsonFormatter writes onto the line.
-        assert warning.max_tokens == built.default_opts["max_tokens"]
-        assert warning.window == num_ctx
+        assert warning.__dict__["max_tokens"] == built.default_opts["max_tokens"]
+        assert warning.__dict__["window"] == num_ctx
 
     def test_hosted_budget_comes_from_the_model_map(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import litellm
@@ -872,7 +904,7 @@ class TestInputBudget:
     def test_an_unmapped_model_has_no_opinion(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import litellm
 
-        def unmapped(model: str) -> dict:
+        def unmapped(model: str) -> dict[str, Any]:
             raise ValueError("This model isn't mapped yet")
 
         monkeypatch.setattr(litellm, "get_model_info", unmapped)
