@@ -208,9 +208,8 @@ def litellm_model_string(provider: Provider, model: str) -> str:
     return f"{_PREFIXES[provider]}/{model}"
 
 
-# The values OpenRouter's own `reasoning.effort` field accepts. `default` — which
-# litellm's normalised set includes — has no equivalent here, so it is reported
-# as dropped rather than translated into a nearby level nobody asked for.
+# The values OpenRouter's own `reasoning.effort` field accepts. Anything else
+# (litellm's `default`) is withheld and named, never translated to a nearby level.
 _OPENROUTER_REASONING_EFFORTS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh"})
 
 
@@ -328,15 +327,16 @@ def _honour_param_support(
     accepts the budget as a top-level ``reasoning`` object regardless of model,
     so that is what gets sent, via ``extra_body``.
 
-    Never both: OpenRouter answers a request carrying ``reasoning`` *and*
-    ``reasoning_effort`` with ``400 Only one of "reasoning" and
-    "reasoning_effort" may be provided``. So the object is only added on the
-    branch where litellm has already been observed to drop the flat param, and
-    the flat param is removed when it is.
+    Never both: OpenRouter 400s on ``reasoning`` beside ``reasoning_effort``, so
+    the object replaces the flat param where litellm drops it. An effort outside
+    OpenRouter's enum is withheld either way (litellm 1.105+ forwards it as-is).
     """
+    effort = opts.get("reasoning_effort") if provider is Provider.openrouter else None
+    if effort is not None and effort not in _OPENROUTER_REASONING_EFFORTS:
+        dropped = sorted({*dropped, "reasoning_effort"})
     configured = [name for name in dropped if name in opts]
-    if provider is Provider.openrouter and "reasoning_effort" in configured:
-        effort = opts.pop("reasoning_effort")
+    if effort is not None and "reasoning_effort" in configured:
+        del opts["reasoning_effort"]
         if effort in _OPENROUTER_REASONING_EFFORTS:
             opts["extra_body"] = {**opts.get("extra_body", {}), "reasoning": {"effort": effort}}
             configured.remove("reasoning_effort")
