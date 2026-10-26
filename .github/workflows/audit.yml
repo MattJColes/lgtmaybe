@@ -36,4 +36,15 @@ jobs:
         run: uv export --frozen --no-dev --no-emit-project --format requirements-txt -o audit-requirements.txt
 
       - name: Audit for known vulnerabilities
-        run: uvx pip-audit --requirement audit-requirements.txt
+        # Ignored, revisit when litellm lifts its `filelock<4.0` cap (fixes are
+        # in filelock 4.2.1, unreachable while every litellm release caps it):
+        #   CVE-2026-112940, CVE-2026-112913: filelock ReadWriteLock, which
+        #     nothing in our dependency tree uses.
+        #   CVE-2026-112907: Windows oplock stalls SoftFileLock.acquire(); only
+        #     huggingface-hub's no-flock fallback uses it, and it needs a local
+        #     attacker on the lock's directory.
+        run: >-
+          uvx pip-audit --requirement audit-requirements.txt
+          --ignore-vuln CVE-2026-112940
+          --ignore-vuln CVE-2026-112913
+          --ignore-vuln CVE-2026-112907
