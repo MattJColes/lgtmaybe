@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.15.3](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.15.2...lgtmaybe-v2.15.3) (2026-10-26)
+
+
+### Dependencies
+
+* bump the python-dependencies group (litellm held), certifi and filelock ([#863](https://github.com/MattJColes/lgtmaybe/issues/863)) ([79821b8](https://github.com/MattJColes/lgtmaybe/commit/79821b8042978f4379a493d80cb5b3217fd68336))
+* bump the python-dependencies group with 6 updates ([#860](https://github.com/MattJColes/lgtmaybe/issues/860)) ([5eba362](https://github.com/MattJColes/lgtmaybe/commit/5eba362bb6f36055474848bfe087fa9b2a1a6b52))
+
 ## [2.15.2](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.15.1...lgtmaybe-v2.15.2) (2026-10-17)
 
 
