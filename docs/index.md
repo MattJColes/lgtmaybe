@@ -4,9 +4,7 @@ description: AI code review on GitHub, GitLab, Gitea and Azure DevOps, or locall
 
 <div class="hero" markdown>
 
-![lgtmaybe: AI code review. Your choice of model.](assets/readme-header.png){ width="100%" }
-
-# lgtmaybe
+# ![lgtmaybe: AI code review. Your choice of model.](assets/readme-header.png){ width="100%" }
 
 </div>
 
