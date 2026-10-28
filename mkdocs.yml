@@ -24,8 +24,7 @@ hooks:
 theme:
   name: material
   custom_dir: overrides
-  # Light-stroke variant: the header bar is slate, the same colour as the
-  # primary logo's strokes, which made the brace arms invisible there.
+  # Light brackets keep the emblem visible against the dark header bar.
   logo: assets/logo-light.svg
   favicon: assets/favicon.ico
   icon:

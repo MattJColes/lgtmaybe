@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/logo.svg" alt="lgtmaybe logo: a shrugging face with curly-brace arms" width="128">
+  <img src="docs/assets/readme-header.png" alt="lgtmaybe. AI code review. Your choice of model. A blue robot reviews code in a cyberpunk city that fades from day to night." width="100%">
 </p>
 
 # lgtmaybe

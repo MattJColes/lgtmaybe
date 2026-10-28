@@ -10,7 +10,7 @@ Source: https://lgtmaybe.coles.codes/ — generated from the docs/ tree.
 
 <div class="hero" markdown>
 
-![lgtmaybe logo: a shrugging face with curly-brace arms](assets/logo.svg){ width="128" }
+![lgtmaybe logo: brackets, green check, amber question mark](assets/logo.svg){ width="128" }
 
 # lgtmaybe
 
