@@ -2,8 +2,6 @@
   <img src="docs/assets/readme-header.png" alt="lgtmaybe. AI code review. Your choice of model. A blue robot reviews code in a cyberpunk city that fades from day to night." width="100%">
 </p>
 
-# lgtmaybe
-
 AI code review for **GitHub, GitLab, Gitea, and Azure DevOps**, or your local
 Git diff. Choose from seven hosted providers, ollama, or any OpenAI-compatible
 endpoint. A [finding](docs/reference/glossary.md#finding) is one issue the
