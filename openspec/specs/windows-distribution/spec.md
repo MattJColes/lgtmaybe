@@ -26,19 +26,28 @@ Python UTF-8 mode.
 
 Each release SHALL build a Windows x86_64 portable `lgtmaybe.exe` with Python
 3.13, bundle the package and litellm data needed at runtime plus ast-grep, and
-attach the versioned artifact only after CLI smoke commands pass. The
-executable MUST NOT bundle optional cloud authentication dependencies.
+attach the versioned artifact only after CLI smoke commands and a Defender
+scan with updated signatures pass. The executable MUST NOT bundle optional
+cloud authentication dependencies. The packaging environment MUST compile the
+locked PyInstaller bootloader from source without reusing a cached wheel, and
+the executable MUST disable optional UPX compression.
 <!-- anchor: windows.executable -->
 
 #### Scenario: a lazy import is absent from the bundle
 - **WHEN** the built executable cannot run the required CLI smoke commands
 - **THEN** the workflow fails without uploading the release asset
 
+#### Scenario: Defender detects a threat or cannot complete the scan
+- **WHEN** the release binary fails the Defender check
+- **THEN** the workflow retains scan logs and the binary hash without publishing
+  the executable
+
 ### Requirement: winget updates follow executable publication
 
 After the executable asset is published, the release workflow SHALL submit an
 update for `MattJColes.lgtmaybe` through winget using the versioned asset URL.
-The reusable workflow MUST also support a manually dispatched recovery run.
+The reusable workflow MUST also support a manually dispatched recovery run
+and scan the published bytes with updated Defender signatures before submission.
 <!-- anchor: windows.winget -->
 
 #### Scenario: release automation publishes a new version
@@ -55,3 +64,8 @@ The reusable workflow MUST also support a manually dispatched recovery run.
 - **WHEN** the package is not yet present in `microsoft/winget-pkgs`
 - **THEN** the winget workflow warns and skips the update without failing the
   other release artifacts
+
+#### Scenario: an existing release needs a Defender recheck
+- **WHEN** a maintainer dispatches the Windows Defender release check
+- **THEN** it downloads and scans the exact release asset, retains evidence,
+  and never rebuilds or replaces the executable

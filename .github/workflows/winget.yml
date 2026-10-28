@@ -21,16 +21,26 @@ permissions:
   contents: read
 
 jobs:
+  # Also gate manual retries and already-published assets against today's
+  # signatures. Rechecking never rebuilds or replaces the release executable.
+  defender:
+    uses: ./.github/workflows/windows-defender.yml
+    with:
+      version: ${{ inputs.version }}
+
   publish:
+    needs: defender
     runs-on: windows-latest
     steps:
       - name: Resolve version
         id: ver
         shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
         run: |
-          $v = "${{ inputs.version }}" -replace '^lgtmaybe-v', '' -replace '^v', ''
-          if (-not $v) {
-            throw "version is required"
+          $v = $env:RELEASE_VERSION -replace '^lgtmaybe-v', '' -replace '^v', ''
+          if ($v -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$') {
+            throw "Expected a release version or tag"
           }
           $asset = "lgtmaybe-$v-windows-x86_64.exe"
           "version=$v" >> $env:GITHUB_OUTPUT

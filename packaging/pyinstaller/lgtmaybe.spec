@@ -44,7 +44,8 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    # Keep collected binaries uncompressed so scanners see their original bytes.
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=True,

@@ -1,0 +1,68 @@
+name: Windows Defender release check
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Existing release version or tag to scan."
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Existing release version or tag to scan, e.g. 2.15.3."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      # Use the workflow's tools even when scanning an older release tag.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Download the exact release executable
+        id: asset
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $v = $env:RELEASE_VERSION -replace '^lgtmaybe-v', '' -replace '^v', ''
+          if ($v -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$') {
+            throw "Expected a release version or tag"
+          }
+          $asset = "lgtmaybe-$v-windows-x86_64.exe"
+          gh release download "lgtmaybe-v$v" --pattern $asset --dir release-asset `
+            --repo $env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not download the existing release asset"
+          }
+          "path=release-asset/$asset" >> $env:GITHUB_OUTPUT
+          "url=https://github.com/$env:GITHUB_REPOSITORY/releases/download/lgtmaybe-v$v/$asset" >> $env:GITHUB_OUTPUT
+
+      - name: Scan with Defender
+        shell: pwsh
+        env:
+          ASSET_PATH: ${{ steps.asset.outputs.path }}
+          ASSET_URL: ${{ steps.asset.outputs.url }}
+        run: python scripts/scan_windows_exe.py $env:ASSET_PATH --asset-url $env:ASSET_URL
+
+      - name: Preserve Defender evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-defender-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: defender-report/
+          retention-days: 30

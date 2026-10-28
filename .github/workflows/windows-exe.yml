@@ -29,10 +29,12 @@ jobs:
       - name: Resolve version
         id: ver
         shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
         run: |
-          $v = "${{ inputs.version }}" -replace '^lgtmaybe-v', '' -replace '^v', ''
-          if (-not $v) {
-            throw "version is required"
+          $v = $env:RELEASE_VERSION -replace '^lgtmaybe-v', '' -replace '^v', ''
+          if ($v -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$') {
+            throw "Expected a release version or tag"
           }
           "version=$v" >> $env:GITHUB_OUTPUT
           "tag=lgtmaybe-v$v" >> $env:GITHUB_OUTPUT
@@ -70,11 +72,15 @@ jobs:
 
       - name: Sync locked packaging environment
         if: steps.idem.outputs.skip != 'true'
-        run: uv sync --frozen --no-dev --group packaging
+        env:
+          # Build the locked PyInstaller bootloader from source rather than
+          # reusing the generic precompiled launcher or a cached wheel.
+          PYINSTALLER_COMPILE_BOOTLOADER: "1"
+        run: uv sync --frozen --no-dev --group packaging --no-binary-package pyinstaller --no-cache
 
       - name: Build executable
         if: steps.idem.outputs.skip != 'true'
-        run: uv run pyinstaller packaging/pyinstaller/lgtmaybe.spec
+        run: uv run --no-sync pyinstaller packaging/pyinstaller/lgtmaybe.spec
 
       - name: Smoke-test executable
         id: smoke
@@ -111,6 +117,31 @@ jobs:
           $size = (Get-Item $exe).Length
           Write-Output "Executable size: $size bytes ($([math]::Round($size / 1MB, 1)) MiB)"
           Copy-Item $exe "${{ steps.ver.outputs.asset }}"
+
+      # An old release tag may predate the scan script. Keep building its code,
+      # but run the release tools from this workflow's revision.
+      - name: Checkout release tools
+        if: steps.idem.outputs.skip != 'true'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: release-tools
+          persist-credentials: false
+
+      - name: Scan with Defender
+        if: steps.idem.outputs.skip != 'true'
+        shell: pwsh
+        env:
+          ASSET_PATH: ${{ steps.ver.outputs.asset }}
+        run: uv run --no-sync python release-tools/scripts/scan_windows_exe.py $env:ASSET_PATH
+
+      - name: Preserve Defender evidence
+        if: always() && steps.idem.outputs.skip != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-defender-build-${{ github.run_id }}-${{ github.run_attempt }}
+          path: defender-report/
+          retention-days: 30
 
       - name: Upload release asset
         if: steps.idem.outputs.skip != 'true'
