@@ -85,6 +85,23 @@ jobs:
         if: steps.idem.outputs.skip != 'true'
         run: uv run --no-sync pyinstaller packaging/pyinstaller/lgtmaybe.spec
 
+      # An old release tag may predate the scan script. Keep building its code,
+      # but run the release tools from this workflow's revision.
+      - name: Checkout release tools
+        if: steps.idem.outputs.skip != 'true'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: release-tools
+          persist-credentials: false
+
+      # This also enables Defender for the smoke commands, so runtime
+      # extraction is tested with real-time protection active.
+      - name: Scan with Defender
+        if: steps.idem.outputs.skip != 'true'
+        shell: pwsh
+        run: uv run --no-sync python release-tools/scripts/scan_windows_exe.py dist/lgtmaybe.exe
+
       - name: Smoke-test executable
         id: smoke
         if: steps.idem.outputs.skip != 'true'
@@ -120,23 +137,6 @@ jobs:
           $size = (Get-Item $exe).Length
           Write-Output "Executable size: $size bytes ($([math]::Round($size / 1MB, 1)) MiB)"
           Copy-Item $exe "${{ steps.ver.outputs.asset }}"
-
-      # An old release tag may predate the scan script. Keep building its code,
-      # but run the release tools from this workflow's revision.
-      - name: Checkout release tools
-        if: steps.idem.outputs.skip != 'true'
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.workflow_sha }}
-          path: release-tools
-          persist-credentials: false
-
-      - name: Scan with Defender
-        if: steps.idem.outputs.skip != 'true'
-        shell: pwsh
-        env:
-          ASSET_PATH: ${{ steps.ver.outputs.asset }}
-        run: uv run --no-sync python release-tools/scripts/scan_windows_exe.py $env:ASSET_PATH
 
       - name: Preserve Defender evidence
         if: always() && steps.idem.outputs.skip != 'true'

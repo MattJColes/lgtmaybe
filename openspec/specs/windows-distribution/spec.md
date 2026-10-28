@@ -31,6 +31,7 @@ scan with updated signatures pass. The executable MUST NOT bundle optional
 cloud authentication dependencies. The packaging environment MUST compile the
 locked PyInstaller bootloader from source without reusing a cached wheel, and
 the executable MUST disable optional UPX compression.
+Defender MUST be active while the CLI smoke commands unpack and run the bundle.
 <!-- anchor: windows.executable -->
 
 #### Scenario: a lazy import is absent from the bundle

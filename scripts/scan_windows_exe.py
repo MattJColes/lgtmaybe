@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import subprocess
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -29,7 +30,21 @@ def _run(args: list[str], log: Path, timeout: int) -> subprocess.CompletedProces
         log.write_bytes((error.stdout or b"") + (error.stderr or b""))
         raise
     log.write_bytes(result.stdout + result.stderr)
+    if result.returncode != 0:
+        # Always expose failures in Actions as well as the downloadable logs.
+        # ASCII escaping also works on Windows consoles with a legacy encoding.
+        print(log.read_bytes().decode("ascii", errors="backslashreplace"))
     return result
+
+
+def _refresh(args: list[str], report_dir: Path) -> subprocess.CompletedProcess:
+    for attempt in range(1, 4):
+        log_name = "update.log" if attempt == 1 else f"update-{attempt}.log"
+        result = _run(args, report_dir / log_name, timeout=120)
+        if result.returncode == 0 or attempt == 3:
+            return result
+        time.sleep(5)
+    raise AssertionError("unreachable")
 
 
 def _scanner() -> Path:
@@ -54,7 +69,7 @@ def scan_executable(executable: Path, report_dir: Path, asset_url: str = "") -> 
     try:
         executable = executable.resolve(strict=True)
         result["sha256"] = _hash(executable)
-        update = _run(
+        update = _refresh(
             [
                 "powershell.exe",
                 "-NoProfile",
@@ -69,12 +84,12 @@ def scan_executable(executable: Path, report_dir: Path, asset_url: str = "") -> 
                 "Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction Stop; "
                 "Update-MpSignature -ErrorAction Stop; "
                 "Get-MpComputerStatus -ErrorAction Stop | "
-                "Select-Object AntivirusEnabled, AMRunningMode, AMProductVersion, "
+                "Select-Object AntivirusEnabled, RealTimeProtectionEnabled, "
+                "AMRunningMode, AMProductVersion, "
                 "AMEngineVersion, AntivirusSignatureVersion, AntivirusSignatureLastUpdated | "
                 "ConvertTo-Json -Compress",
             ],
-            report_dir / "update.log",
-            timeout=300,
+            report_dir,
         )
         if update.returncode != 0:
             raise RuntimeError(
@@ -82,8 +97,13 @@ def scan_executable(executable: Path, report_dir: Path, asset_url: str = "") -> 
             )
         status = json.loads(update.stdout.decode("utf-8-sig"))
         result["defender"] = status
-        if status.get("AntivirusEnabled") is not True or status.get("AMRunningMode") != "Normal":
-            raise RuntimeError("Microsoft Defender Antivirus is not enabled in Normal mode")
+        if (
+            not isinstance(status, dict)
+            or status.get("AntivirusEnabled") is not True
+            or status.get("RealTimeProtectionEnabled") is not True
+            or status.get("AMRunningMode") != "Normal"
+        ):
+            raise RuntimeError("Defender and real-time protection must be enabled in Normal mode")
         scan = _run(
             [
                 str(_scanner()),

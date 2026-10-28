@@ -6,6 +6,7 @@ import hashlib
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -30,19 +31,28 @@ def defender(tmp_path, monkeypatch):
     return exe, tmp_path / "report", scanner
 
 
-def mock_defender(monkeypatch, *, code=0, enabled=True, update_code=0, mutation=None):
+def mock_defender(
+    monkeypatch, *, code=0, enabled=True, realtime=True, update_code=0, mutation=None
+):
     calls = []
 
     def run(args, **kwargs):
         calls.append(args)
         if args[0] == "powershell.exe":
-            status = json.dumps({"AntivirusEnabled": enabled, "AMRunningMode": "Normal"})
+            status = json.dumps(
+                {
+                    "AntivirusEnabled": enabled,
+                    "RealTimeProtectionEnabled": realtime,
+                    "AMRunningMode": "Normal",
+                }
+            )
             return subprocess.CompletedProcess(args, update_code, status.encode(), b"")
         if mutation:
             mutation()
         return subprocess.CompletedProcess(args, code, b"Defender scan output", b"")
 
     monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(time, "sleep", lambda _: None)
     return calls
 
 
@@ -87,15 +97,17 @@ def test_detection_or_scanner_error_blocks_publication_and_keeps_evidence(
     assert "blocks publication" in (report / "report.md").read_text(encoding="utf-8")
 
 
-@pytest.mark.parametrize("enabled,update_code", [(False, 0), (True, 1)])
+@pytest.mark.parametrize(
+    "enabled,realtime,update_code", [(False, True, 0), (True, False, 0), (True, True, 1)]
+)
 def test_disabled_defender_or_failed_signature_update_is_not_a_pass(
-    defender, monkeypatch, enabled, update_code
+    defender, monkeypatch, enabled, realtime, update_code
 ):
     exe, report, _ = defender
-    calls = mock_defender(monkeypatch, enabled=enabled, update_code=update_code)
+    calls = mock_defender(monkeypatch, enabled=enabled, realtime=realtime, update_code=update_code)
 
     assert scan_executable(exe, report) == 1
-    assert len(calls) == 1
+    assert len(calls) == (3 if update_code else 1)
     assert json.loads((report / "result.json").read_text(encoding="utf-8"))["verdict"] == "failed"
 
 
@@ -123,6 +135,33 @@ def test_timeout_preserves_a_failed_report(defender, monkeypatch):
     assert "timed out" in (report / "report.md").read_text(encoding="utf-8")
 
 
+def test_transient_signature_update_failure_is_retried_before_scanning(defender, monkeypatch):
+    exe, report, _ = defender
+    calls = mock_defender(monkeypatch)
+    backend = subprocess.run
+    first = True
+
+    def transient(args, **kwargs):
+        nonlocal first
+        if first:
+            first = False
+            return subprocess.CompletedProcess(args, 1, b"update busy", b"")
+        return backend(args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", transient)
+    assert scan_executable(exe, report) == 0
+    assert len(calls) == 2
+    assert (report / "update.log").read_bytes() == b"update busy"
+    assert (report / "update-2.log").exists()
+
+
+def test_failed_command_diagnostics_are_visible_in_actions_log(defender, monkeypatch, capsys):
+    exe, report, _ = defender
+    mock_defender(monkeypatch, update_code=1)
+    scan_executable(exe, report)
+    assert "AntivirusEnabled" in capsys.readouterr().out
+
+
 def test_existing_release_can_be_scanned_without_rebuilding_or_publishing():
     text, workflow = read_workflow("windows-defender.yml")
     assert "workflow_call:" in text and "workflow_dispatch:" in text
@@ -144,7 +183,9 @@ def test_defender_blocks_both_new_assets_and_manual_winget_submissions():
     steps = build["jobs"]["build"]["steps"]
     scan = next(i for i, s in enumerate(steps) if s.get("name") == "Scan with Defender")
     upload = next(i for i, s in enumerate(steps) if s.get("name") == "Upload release asset")
-    assert scan < upload
+    smoke = next(i for i, s in enumerate(steps) if s.get("name") == "Smoke-test executable")
+    # Defender must be active while the one-file executable unpacks and runs.
+    assert scan < smoke < upload
     assert steps[scan]["if"] == "steps.idem.outputs.skip != 'true'"
     assert "continue-on-error" not in steps[scan]
     tools = next(s for s in steps if s.get("name") == "Checkout release tools")

@@ -7229,6 +7229,7 @@ The build scans new executables before upload. The winget workflow scans the
 published file again before submission, including manual retries. Both checks
 update Defender's signatures first. A detection, scan error, or failed update
 blocks publication or submission.
+Defender stays active while smoke tests unpack and run the executable.
 
 The packaging environment compiles PyInstaller's launcher from the locked source
 package on each build. The bundle also disables optional UPX compression. These
@@ -7241,7 +7242,7 @@ Open the run summary for the verdict and SHA-256 hash. Download its
 `windows-defender-*` artefact for:
 
 - `scan.log`, containing the scan output and any detection name;
-- `update.log`, containing update and status output;
+- `update*.log`, containing update and status output, including retries;
 - `result.json`, containing the hash, exit code, and engine and signature versions;
 - `report.md`, containing the result and next steps.
 
