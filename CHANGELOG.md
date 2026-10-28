@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.15.4](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.15.3...lgtmaybe-v2.15.4) (2026-10-28)
+
+
+### Bug Fixes
+
+* **windows:** rebuild PyInstaller launcher and gate releases on Defender ([#867](https://github.com/MattJColes/lgtmaybe/issues/867)) ([1c2262c](https://github.com/MattJColes/lgtmaybe/commit/1c2262c55de7b8de55743fe917afefaf34e8497a))
+
+
+### Documentation
+
+* refresh README artwork and brand assets ([#864](https://github.com/MattJColes/lgtmaybe/issues/864)) ([c39fd74](https://github.com/MattJColes/lgtmaybe/commit/c39fd74cf13055d5a9309b57f6b831a99c193f94))
+* remove homepage banner permalink and extra spacing ([#869](https://github.com/MattJColes/lgtmaybe/issues/869)) ([f32f4d0](https://github.com/MattJColes/lgtmaybe/commit/f32f4d0260663150db689258a324a3bb2c329a36))
+* use README banner on documentation homepage ([#866](https://github.com/MattJColes/lgtmaybe/issues/866)) ([5c9def2](https://github.com/MattJColes/lgtmaybe/commit/5c9def271f2a8ab203246e20132e4877f0afeedf))
+
 ## [2.15.3](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.15.2...lgtmaybe-v2.15.3) (2026-10-26)
 
 
