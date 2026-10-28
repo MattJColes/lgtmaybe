@@ -58,7 +58,7 @@ jobs:
             Write-Output "Release asset already exists; nothing to do."
           }
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: steps.idem.outputs.skip != 'true'
         with:
           ref: ${{ steps.ver.outputs.tag }}
@@ -89,7 +89,7 @@ jobs:
       # but run the release tools from this workflow's revision.
       - name: Checkout release tools
         if: steps.idem.outputs.skip != 'true'
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.workflow_sha }}
           path: release-tools
@@ -140,7 +140,7 @@ jobs:
 
       - name: Preserve Defender evidence
         if: always() && steps.idem.outputs.skip != 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: windows-defender-build-${{ github.run_id }}-${{ github.run_attempt }}
           path: defender-report/
