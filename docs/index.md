@@ -2,13 +2,9 @@
 description: AI code review on GitHub, GitLab, Gitea and Azure DevOps, or locally, with OpenAI, Claude, Bedrock, Vertex, Azure or local models. Keyless cloud auth.
 ---
 
-<div class="hero" markdown>
-
-![lgtmaybe logo: brackets, green check, amber question mark](assets/logo.svg){ width="128" }
-
-# lgtmaybe
-
-</div>
+<h1 class="hero">
+  <img src="assets/readme-header.png" alt="lgtmaybe: AI code review. Your choice of model." width="100%">
+</h1>
 
 lgtmaybe reviews pull and merge requests on **GitHub, GitLab, Gitea, and Azure
 DevOps**, posting inline comments and one summary. Choose a hosted model,

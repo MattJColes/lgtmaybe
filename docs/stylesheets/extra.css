@@ -25,11 +25,11 @@
   --md-typeset-a-color:         #54d090;
 }
 
-/* Homepage hero: centre the logo, wordmark, and tagline as a single block. */
-.md-typeset .hero {
-  text-align: center;
+/* Homepage hero: the banner contains the wordmark and tagline. */
+.md-typeset h1.hero {
+  margin: 0 0 1.25rem;
 }
 
-.md-typeset .hero h1 {
-  margin-top: 0.4rem;
+.md-typeset .hero img {
+  display: block;
 }
