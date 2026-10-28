@@ -164,6 +164,8 @@ def test_windows_packaging_builds_its_locked_bootloader_without_upx():
         steps = workflow["jobs"][job_name]["steps"]
         sync = next(s for s in steps if s.get("name") == "Sync locked packaging environment")
         assert sync["env"]["PYINSTALLER_COMPILE_BOOTLOADER"] == "1"
+        assert sync["env"]["TEMP"] == "${{ runner.temp }}"
+        assert sync["env"]["TMP"] == "${{ runner.temp }}"
         assert "--frozen" in sync["run"]
         assert "--no-binary-package pyinstaller" in sync["run"]
         assert "--no-cache" in sync["run"]
@@ -183,3 +185,9 @@ def test_packaging_prs_build_scan_and_smoke_without_release_permissions():
     assert "gh release upload" not in runs
     upload = next(s for s in job["steps"] if "upload-artifact@" in s.get("uses", ""))
     assert upload["if"] == "always()"
+    comparison = next(
+        s for s in job["steps"] if s.get("name") == "Check existing release for comparison"
+    )
+    assert comparison["continue-on-error"] is True
+    candidate = next(s for s in job["steps"] if s.get("name") == "Scan with Defender")
+    assert "continue-on-error" not in candidate

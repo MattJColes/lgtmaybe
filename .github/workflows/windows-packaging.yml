@@ -33,7 +33,27 @@ jobs:
       - name: Sync locked packaging environment
         env:
           PYINSTALLER_COMPILE_BOOTLOADER: "1"
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
         run: uv sync --frozen --no-dev --group packaging --no-binary-package pyinstaller --no-cache
+
+      # Compare with the existing release, but gate this PR on its new build.
+      - name: Check existing release for comparison
+        continue-on-error: true
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $json = gh release view --repo $env:GITHUB_REPOSITORY --json tagName,assets
+          if ($LASTEXITCODE -ne 0) { throw "Could not read the latest release" }
+          $release = ($json -join "`n") | ConvertFrom-Json
+          $asset = $release.assets | Where-Object { $_.name -like '*-windows-x86_64.exe' } | Select-Object -First 1
+          if (-not $asset) { throw "The latest release has no Windows executable yet" }
+          gh release download $release.tagName --repo $env:GITHUB_REPOSITORY `
+            --pattern $asset.name --dir existing-release
+          if ($LASTEXITCODE -ne 0) { throw "Could not download the existing executable" }
+          uv run --no-sync python scripts/scan_windows_exe.py "existing-release/$($asset.name)" `
+            --asset-url $asset.url --report-dir defender-report/existing-release
 
       - name: Build executable
         run: uv run --no-sync pyinstaller packaging/pyinstaller/lgtmaybe.spec

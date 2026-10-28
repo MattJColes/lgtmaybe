@@ -76,6 +76,9 @@ jobs:
           # Build the locked PyInstaller bootloader from source rather than
           # reusing the generic precompiled launcher or a cached wheel.
           PYINSTALLER_COMPILE_BOOTLOADER: "1"
+          # Avoid Waf mixing 8.3 user-temp aliases with canonical MSVC paths.
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
         run: uv sync --frozen --no-dev --group packaging --no-binary-package pyinstaller --no-cache
 
       - name: Build executable
