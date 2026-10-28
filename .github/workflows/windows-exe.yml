@@ -62,6 +62,7 @@ jobs:
         if: steps.idem.outputs.skip != 'true'
         with:
           ref: ${{ steps.ver.outputs.tag }}
+          persist-credentials: false
 
       - name: Install uv
         if: steps.idem.outputs.skip != 'true'

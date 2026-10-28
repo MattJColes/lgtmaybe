@@ -5,17 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
-import sys
 import time
 from pathlib import Path
 
 import pytest
+from scripts.scan_windows_exe import scan_executable
 
 from tests.conftest import read_workflow
-
-sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-
-from scan_windows_exe import scan_executable  # noqa: E402
 
 
 @pytest.fixture
@@ -162,6 +158,45 @@ def test_failed_command_diagnostics_are_visible_in_actions_log(defender, monkeyp
     assert "AntivirusEnabled" in capsys.readouterr().out
 
 
+def test_missing_executable_fails_before_running_defender_and_keeps_report(defender, monkeypatch):
+    exe, report, _ = defender
+    calls = mock_defender(monkeypatch)
+    exe.unlink()
+
+    assert scan_executable(exe, report) == 1
+    assert calls == []
+    result = json.loads((report / "result.json").read_text(encoding="utf-8"))
+    assert result["verdict"] == "failed"
+    assert "sha256" not in result
+    assert (report / "report.md").is_file()
+
+
+def test_missing_scanner_fails_with_hash_and_diagnostics(defender, monkeypatch):
+    exe, report, scanner = defender
+    calls = mock_defender(monkeypatch)
+    scanner.unlink()
+
+    assert scan_executable(exe, report) == 1
+    assert len(calls) == 1  # Refresh succeeds; no scan can be started.
+    result = json.loads((report / "result.json").read_text(encoding="utf-8"))
+    assert result["verdict"] == "failed"
+    assert result["sha256"] == hashlib.sha256(exe.read_bytes()).hexdigest()
+    assert "MpCmdRun.exe was not found" in result["error"]
+
+
+def test_serviced_scanner_takes_precedence_over_the_inbox_copy(defender, monkeypatch):
+    exe, report, _ = defender
+    calls = mock_defender(monkeypatch)
+    platform = exe.parent / "data/Microsoft/Windows Defender/Platform"
+    for version in ("4.18.26090.1", "4.18.26100.1"):
+        scanner = platform / version / "MpCmdRun.exe"
+        scanner.parent.mkdir(parents=True)
+        scanner.touch()
+
+    assert scan_executable(exe, report) == 0
+    assert calls[1][0] == str(platform / "4.18.26100.1/MpCmdRun.exe")
+
+
 def test_existing_release_can_be_scanned_without_rebuilding_or_publishing():
     text, workflow = read_workflow("windows-defender.yml")
     assert "workflow_call:" in text and "workflow_dispatch:" in text
@@ -191,6 +226,11 @@ def test_defender_blocks_both_new_assets_and_manual_winget_submissions():
     tools = next(s for s in steps if s.get("name") == "Checkout release tools")
     assert tools["with"]["ref"] == "${{ github.workflow_sha }}"
     assert tools["with"]["path"] == "release-tools"
+    evidence = next(s for s in steps if s.get("name") == "Preserve Defender evidence")
+    assert evidence["if"] == "always() && steps.idem.outputs.skip != 'true'"
+    assert evidence["with"]["path"] == "defender-report/"
+    checkouts = [s for s in steps if s.get("uses", "").startswith("actions/checkout@")]
+    assert all(s["with"].get("persist-credentials") is False for s in checkouts)
     _, winget = read_workflow("winget.yml")
     assert winget["jobs"]["defender"]["uses"] == "./.github/workflows/windows-defender.yml"
     assert winget["jobs"]["publish"]["needs"] == "defender"

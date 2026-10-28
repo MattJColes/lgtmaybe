@@ -17,6 +17,23 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+# Hosted Windows images can ship with the Defender service stopped.
+_DEFENDER_REFRESH = """
+$ErrorActionPreference = 'Stop'
+$service = Get-Service WinDefend -ErrorAction Stop
+if ($service.Status -ne 'Running') {
+    Set-Service WinDefend -StartupType Automatic -ErrorAction Stop
+    Start-Service WinDefend -ErrorAction Stop
+}
+Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction Stop
+Update-MpSignature -ErrorAction Stop
+Get-MpComputerStatus -ErrorAction Stop |
+    Select-Object AntivirusEnabled, RealTimeProtectionEnabled, AMRunningMode,
+        AMProductVersion, AMEngineVersion, AntivirusSignatureVersion,
+        AntivirusSignatureLastUpdated |
+    ConvertTo-Json -Compress
+"""
+
 
 def _hash(path: Path) -> str:
     with path.open("rb") as stream:
@@ -38,13 +55,13 @@ def _run(args: list[str], log: Path, timeout: int) -> subprocess.CompletedProces
 
 
 def _refresh(args: list[str], report_dir: Path) -> subprocess.CompletedProcess:
-    for attempt in range(1, 4):
-        log_name = "update.log" if attempt == 1 else f"update-{attempt}.log"
-        result = _run(args, report_dir / log_name, timeout=120)
-        if result.returncode == 0 or attempt == 3:
-            return result
+    result = _run(args, report_dir / "update.log", timeout=120)
+    for attempt in range(2, 4):
+        if result.returncode == 0:
+            break
         time.sleep(5)
-    raise AssertionError("unreachable")
+        result = _run(args, report_dir / f"update-{attempt}.log", timeout=120)
+    return result
 
 
 def _scanner() -> Path:
@@ -75,19 +92,7 @@ def scan_executable(executable: Path, report_dir: Path, asset_url: str = "") -> 
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
-                "$ErrorActionPreference = 'Stop'; "
-                # Hosted Windows images can ship with this service stopped.
-                "$service = Get-Service WinDefend -ErrorAction Stop; "
-                "if ($service.Status -ne 'Running') { "
-                "Set-Service WinDefend -StartupType Automatic -ErrorAction Stop; "
-                "Start-Service WinDefend -ErrorAction Stop }; "
-                "Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction Stop; "
-                "Update-MpSignature -ErrorAction Stop; "
-                "Get-MpComputerStatus -ErrorAction Stop | "
-                "Select-Object AntivirusEnabled, RealTimeProtectionEnabled, "
-                "AMRunningMode, AMProductVersion, "
-                "AMEngineVersion, AntivirusSignatureVersion, AntivirusSignatureLastUpdated | "
-                "ConvertTo-Json -Compress",
+                _DEFENDER_REFRESH,
             ],
             report_dir,
         )
