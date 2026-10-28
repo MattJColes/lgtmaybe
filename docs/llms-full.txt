@@ -7031,7 +7031,8 @@ everywhere:
   succeeds (described below).
 - **Windows**, through two workflows:
     - `.github/workflows/windows-exe.yml` builds and smoke-tests a portable
-      executable and attaches it to the release.
+      executable. It updates Defender, scans the file, and attaches it only
+      after those checks pass.
     - `.github/workflows/winget.yml` then submits that asset to winget. The
       winget job waits for the executable job.
 
@@ -7050,6 +7051,7 @@ work out the next version.
 - [The Homebrew Formula](#the-homebrew-formula)
 - [One-Time Setup](#one-time-setup)
 - [Each Release](#each-release)
+- [Defender Checks and Recovery](#defender-checks-and-recovery)
 - [Rotate the Public App Private Key](#rotate-the-public-app-private-key)
 - [Before Going Public](#before-going-public)
 
@@ -7207,6 +7209,46 @@ cooldown to wait out, because the workflow doesn't use
    `gh api -X POST repos/MattJColes/winget-pkgs/merge-upstream -f branch=master`.
    Then dispatch `winget` again with the version. If it keeps recurring, check
    that `WINGET_TOKEN` still carries the `workflow` scope.
+
+## Defender Checks and Recovery
+
+```bash
+gh workflow run windows-defender.yml -f version=2.15.3
+```
+
+Run this from the repository after the workflow reaches `main`. It downloads
+the existing release file on a Windows runner. It does not rebuild or replace
+the executable. You can also select **Windows Defender release check** in
+Actions and choose **Run workflow**.
+
+The build scans new executables before upload. The winget workflow scans the
+published file again before submission, including manual retries. Both checks
+update Defender's signatures first. A detection, scan error, or failed update
+blocks publication or submission.
+Defender stays active while smoke tests unpack and run the executable.
+
+The packaging environment compiles PyInstaller's launcher from the locked source
+package on each build. The bundle also disables optional UPX compression. These
+steps reduce common packaging triggers for antivirus false positives.
+[PyInstaller's build guide](https://pyinstaller.org/en/stable/bootloader-building.html)
+describes the launcher build. The **Windows packaging** PR check builds, scans,
+and smoke-tests changes to the release recipe before merge.
+
+Open the run summary for the verdict and SHA-256 hash. Download its
+`windows-defender-*` artefact for:
+
+- `scan.log`, containing the scan output and any detection name;
+- `update*.log`, containing update and status output, including retries;
+- `result.json`, containing the hash, exit code, and engine and signature versions;
+- `report.md`, containing the result and next steps.
+
+A clean scan does not guarantee that winget's installation tests will pass.
+Defender can also detect files extracted or run during installation.
+
+When a check fails, inspect its logs and fix the packaging or scanner error.
+Build and scan the corrected executable in CI before publishing it. If the
+release already exists, use a new version so the winget manifest identifies
+the corrected bytes. Then dispatch `winget` with that version.
 
 ## Rotate the Public App Private Key
 
