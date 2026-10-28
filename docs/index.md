@@ -4,7 +4,7 @@ description: AI code review on GitHub, GitLab, Gitea and Azure DevOps, or locall
 
 <div class="hero" markdown>
 
-![lgtmaybe logo: brackets, green check, amber question mark](assets/logo.svg){ width="128" }
+![lgtmaybe: AI code review. Your choice of model.](assets/readme-header.png){ width="100%" }
 
 # lgtmaybe
 
