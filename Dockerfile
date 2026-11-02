@@ -98,6 +98,6 @@ ENV PATH="/app/.venv/bin:$PATH"
 # Warmed through lgtmaybe's own loader so the encoding name lives only in
 # compress.py; it raises (no character-estimate fallback) if the fetch fails.
 ENV TIKTOKEN_CACHE_DIR=/usr/share/tiktoken_cache
-RUN python -c "from lgtmaybe.engine.compress import _load_tiktoken_counter; _load_tiktoken_counter()"
+RUN python -c "from lgtmaybe.engine.compress import load_tiktoken_counter; load_tiktoken_counter()"
 
 ENTRYPOINT ["python", "-m", "lgtmaybe"]

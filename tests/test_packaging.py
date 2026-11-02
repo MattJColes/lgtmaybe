@@ -72,8 +72,8 @@ def test_dockerfile_bakes_the_tiktoken_vocab_for_air_gapped_runs() -> None:
     cache_env_line = "ENV TIKTOKEN_CACHE_DIR=/usr/share/tiktoken_cache"
     venv_path_line = 'ENV PATH="/app/.venv/bin:$PATH"'
     warm_line = (
-        'RUN python -c "from lgtmaybe.engine.compress import _load_tiktoken_counter; '
-        '_load_tiktoken_counter()"'
+        'RUN python -c "from lgtmaybe.engine.compress import load_tiktoken_counter; '
+        'load_tiktoken_counter()"'
     )
     for expected in (cache_env_line, venv_path_line, warm_line):
         assert expected in lines, f"Dockerfile is missing: {expected}"
