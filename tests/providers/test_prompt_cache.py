@@ -56,12 +56,11 @@ _CACHEABLE_MODELS = [
     # it (claude, gemini, minimax, glm, z-ai) and STRIPS it for the rest, so we
     # mark broadly and let litellm decide per model — see the deepseek case in
     # TestOpenRouterBreakpoints. The adapter still needs litellm's capability
-    # map to say the id caches: 1.103 sourced openrouter/minimax/minimax-m2 and
-    # openrouter/deepseek/deepseek-chat as `supports_prompt_caching: false`, so
-    # pick ids the map still marks.
+    # map to say the id caches. Since 1.106 the map answers OpenRouter only
+    # through claude, gpt and gemini family rules (glm, minimax and deepseek ids
+    # are unmapped), so pick ids those rules still mark.
     "openrouter/anthropic/claude-sonnet-4.5",
-    "openrouter/z-ai/glm-4.6",
-    "openrouter/minimax/minimax-m2.7",
+    "openrouter/google/gemini-3.8-flash",
 ]
 
 _UNCACHEABLE_MODELS = [
@@ -69,6 +68,9 @@ _UNCACHEABLE_MODELS = [
     "openai/gpt-4o",  # OpenAI caches automatically server-side — no marker
     "openai/local-model",  # openai-compatible route
     "azure/gpt-4o",
+    # Unmapped since litellm 1.106, so the adapter declines to mark it; deepseek
+    # caches the identical split prefix automatically anyway.
+    "openrouter/deepseek/deepseek-chat-v3.1",
 ]
 
 
@@ -270,14 +272,6 @@ class TestOpenRouterBreakpoints:
         """The reason we can mark the whole openrouter route: an unsupported
         model loses the marker upstream instead of erroring on it."""
         assert self._breakpoints_reaching_the_api(model) == 0
-
-    def test_adapter_marks_a_stripped_model_anyway(self) -> None:
-        """deepseek via openrouter still gets our breakpoint — harmless (litellm
-        removes it) and it keeps the split prefix identical across lenses, which
-        is what deepseek's automatic caching keys on."""
-        sent = _sent_split("openrouter/deepseek/deepseek-chat-v3.1")
-        assert len(sent) == 2
-        assert sent[0]["content"][0]["cache_control"] == {"type": "ephemeral"}
 
 
 class TestCacheUsageMapping:

@@ -127,20 +127,15 @@ def _named_models() -> list[tuple[str, Provider, str]]:
 
 
 def _in_model_map(provider: Provider, model: str) -> bool:
-    """The routed key, or the bare key when the bare entry belongs to the same
-    provider — litellm's own lookup strips the route prefix but checks the
-    entry's ``litellm_provider``, so a bare key owned by another provider (a
-    vertex id answered by anthropic's entry) would resolve here and not there.
+    """litellm's own lookup, the one the adapter's window and caching checks
+    use: since 1.106 it answers OpenRouter ids from family rules
+    (``fallback_generalizations``), not exact ``model_cost`` keys.
     """
-    routed = litellm_model_string(provider, model)
-    if routed in litellm.model_cost:
-        return True
-    entry = litellm.model_cost.get(model)
-    owner = entry.get("litellm_provider") if isinstance(entry, dict) else None
-    route = routed.split("/", 1)[0]
-    return isinstance(owner, str) and (
-        owner == route or owner.startswith((f"{route}_", f"{route}-"))
-    )
+    try:
+        litellm.get_model_info(litellm_model_string(provider, model))
+    except Exception:
+        return False
+    return True
 
 
 _NAMED = _named_models()
