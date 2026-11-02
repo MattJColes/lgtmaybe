@@ -70,6 +70,10 @@ inputs:
     description: "Token budget per model call before the diff is split into batches (any provider). Leave empty for the default (100000)."
     required: false
     default: ""
+  max_files:
+    description: "Review at most this many changed files (riskiest first when triage_model is set); the review posts a \"reviewed top N of M\" notice when it cuts any. Leave empty for the default (50)."
+    required: false
+    default: ""
   max_tokens:
     description: "Cap the tokens each model call may generate (any provider). Leave empty for the provider default: ollama, openai-compatible and openrouter get a 16384-token ceiling (OpenRouter reserves prompt + max_tokens against a prepaid balance); every other provider keeps the model's own ceiling. 0 sends no cap."
     required: false
@@ -309,6 +313,7 @@ runs:
         INPUT_TEMPERATURE: ${{ inputs.temperature }}
         INPUT_NUM_CTX: ${{ inputs.num_ctx }}
         INPUT_MAX_INPUT_TOKENS: ${{ inputs.max_input_tokens }}
+        INPUT_MAX_FILES: ${{ inputs.max_files }}
         INPUT_MAX_TOKENS: ${{ inputs.max_tokens }}
         INPUT_REASONING_EFFORT: ${{ inputs.reasoning_effort }}
         INPUT_MAX_CONCURRENCY: ${{ inputs.max_concurrency }}

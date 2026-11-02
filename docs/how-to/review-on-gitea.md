@@ -53,6 +53,21 @@ So the example runs lgtmaybe's container image with the same `action` command
 and `INPUT_*` variables. lgtmaybe reads `GITHUB_SERVER_URL`, which Gitea points
 at your own instance, to know which host to post to.
 
+## Configure Options
+
+An option the GitHub Action takes as an input, such as `preset` or
+`max_files`, is an `INPUT_<NAME>` variable in the Review step's `env:`
+block, for example `INPUT_MAX_FILES: "200"`. The names match the
+[Action inputs](use-as-github-action.md).
+
+Every other option, such as `min_severity` or the path filters,
+goes in [`.lgtmaybe.yml`](configure-lgtmaybe-yml.md) on the base branch. The
+example's first step checks that branch out, never the pull request's head, so
+lgtmaybe can read the file. A run triggered by a `/review` comment has no base
+branch in its event, so it reads the file from the default branch instead. Setting one of these as an `INPUT_*` variable, for
+example `INPUT_MIN_SEVERITY`, fails the run with a message naming the file, rather
+than reviewing with the default.
+
 ## Try It Locally First
 
 Reviewing a pull request by URL happens in the Actions run, where the token and
