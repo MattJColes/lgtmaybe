@@ -38,13 +38,28 @@ jobs:
       - name: Audit for known vulnerabilities
         # Ignored, revisit when litellm lifts its `filelock<4.0` cap (fixes are
         # in filelock 4.2.1, unreachable while every litellm release caps it):
-        #   CVE-2026-112940, CVE-2026-112913: filelock ReadWriteLock, which
-        #     nothing in our dependency tree uses.
-        #   CVE-2026-112907: Windows oplock stalls SoftFileLock.acquire(); only
-        #     huggingface-hub's no-flock fallback uses it, and it needs a local
-        #     attacker on the lock's directory.
+        #   CVE-2026-112940, CVE-2026-112913, CVE-2026-112936, CVE-2026-112915:
+        #     filelock ReadWriteLock, which nothing in our dependency tree uses.
+        #   CVE-2026-112908, CVE-2026-112911, CVE-2026-112938: StrictSoftFileLock
+        #     and SoftReadWriteLock, which nothing in our dependency tree uses.
+        #   CVE-2026-112907, CVE-2026-112912, CVE-2026-112935, CVE-2026-112939:
+        #     SoftFileLock; only huggingface-hub's no-flock fallback uses it, and
+        #     each needs a local attacker on the lock's directory.
+        #   CVE-2026-112909, CVE-2026-112910: Unix/WindowsFileLock behind
+        #     huggingface-hub's cache and litellm's proxy CLI (which we never
+        #     run); both need another local user writing to the lock's directory.
         run: >-
           uvx pip-audit --requirement audit-requirements.txt
           --ignore-vuln CVE-2026-112940
           --ignore-vuln CVE-2026-112913
+          --ignore-vuln CVE-2026-112936
+          --ignore-vuln CVE-2026-112915
+          --ignore-vuln CVE-2026-112908
+          --ignore-vuln CVE-2026-112911
+          --ignore-vuln CVE-2026-112938
           --ignore-vuln CVE-2026-112907
+          --ignore-vuln CVE-2026-112912
+          --ignore-vuln CVE-2026-112935
+          --ignore-vuln CVE-2026-112939
+          --ignore-vuln CVE-2026-112909
+          --ignore-vuln CVE-2026-112910
