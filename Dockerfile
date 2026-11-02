@@ -95,7 +95,9 @@ ENV PATH="/app/.venv/bin:$PATH"
 # from openaipublic.blob.core.windows.net on first use, every run, because the
 # container starts with an empty cache. litellm bundles the same file but no
 # longer sets TIKTOKEN_CACHE_DIR at import, so it cannot be relied on here.
+# Warmed through lgtmaybe's own loader so the encoding name lives only in
+# compress.py; it raises (no character-estimate fallback) if the fetch fails.
 ENV TIKTOKEN_CACHE_DIR=/usr/share/tiktoken_cache
-RUN python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
+RUN python -c "from lgtmaybe.engine.compress import _load_tiktoken_counter; _load_tiktoken_counter()"
 
 ENTRYPOINT ["python", "-m", "lgtmaybe"]
