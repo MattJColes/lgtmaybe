@@ -564,6 +564,11 @@ with:
   # ...provider, model, api_key as usual
 ```
 
+On an air-gapped or egress-restricted runner, mirror the image and point
+`image` at your copy. The image bakes in its tokenizer vocabulary and the
+offline vulnerability database, so at run time it needs to reach only your code
+host and your model endpoint.
+
 ## On Another Code Host
 
 The review is identical on GitLab and Gitea. Only the wiring and a few

@@ -749,7 +749,7 @@ class TestTokenCountingIsVisible:
         compress._counter_for.cache_clear()
         compress.count_tokens.cache_clear()
         monkeypatch.setattr(
-            compress, "_load_tiktoken_counter", lambda: (_ for _ in ()).throw(OSError("403"))
+            compress, "load_tiktoken_counter", lambda: (_ for _ in ()).throw(OSError("403"))
         )
 
         messages = self._warnings_while(lambda: compress.count_tokens("some diff text"))
@@ -763,7 +763,7 @@ class TestTokenCountingIsVisible:
         than the configured budget, which is what collapsed recall."""
         compress._counter_for.cache_clear()
         compress.count_tokens.cache_clear()
-        monkeypatch.setattr(compress, "_load_tiktoken_counter", lambda: None)
+        monkeypatch.setattr(compress, "load_tiktoken_counter", lambda: None)
         code = 'def handler(request):\n    return {"ok": True, "id": request.id}\n' * 20
 
         estimate = compress.count_tokens(code)

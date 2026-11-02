@@ -59,3 +59,26 @@ def test_pyinstaller_spec_collects_data_trees() -> None:
     assert 'collect_data_files("litellm")' in spec
     assert '"tiktoken_ext"' in spec
     assert '"tiktoken_ext.openai_public"' in spec
+
+
+def test_dockerfile_bakes_the_tiktoken_vocab_for_air_gapped_runs() -> None:
+    # compress.count_tokens loads cl100k_base, which tiktoken downloads from
+    # openaipublic.blob.core.windows.net on first use unless it is cached.
+    # Warmed at build time into a dir the runtime ENV also points at, the image
+    # never needs that egress (#871).
+    # The warm goes through compress's own loader, so the encoding name has
+    # one source of truth and a tokenizer change cannot leave the image stale.
+    lines = [line.strip() for line in _DOCKERFILE.read_text(encoding="utf-8").splitlines()]
+    cache_env_line = "ENV TIKTOKEN_CACHE_DIR=/usr/share/tiktoken_cache"
+    venv_path_line = 'ENV PATH="/app/.venv/bin:$PATH"'
+    warm_line = (
+        'RUN python -c "from lgtmaybe.engine.compress import load_tiktoken_counter; '
+        'load_tiktoken_counter()"'
+    )
+    for expected in (cache_env_line, venv_path_line, warm_line):
+        assert expected in lines, f"Dockerfile is missing: {expected}"
+    cache_env, venv_path, warm = (
+        lines.index(line) for line in (cache_env_line, venv_path_line, warm_line)
+    )
+    assert warm > cache_env, "set the cache dir before warming, or the vocab lands in /tmp"
+    assert warm > venv_path, "warm with the venv's python, the one that has tiktoken"

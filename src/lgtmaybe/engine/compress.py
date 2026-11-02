@@ -33,7 +33,7 @@ _SCALE = 5_000
 _FALLBACK_CHARS_PER_TOKEN = 3
 
 
-def _load_tiktoken_counter() -> Callable[[str], int] | None:
+def load_tiktoken_counter() -> Callable[[str], int] | None:
     """A counter using ``cl100k_base``, for every model.
 
     Deliberately one encoding rather than "the model's own": litellm's tokenizer
@@ -58,7 +58,7 @@ def _counter_for() -> Callable[[str], int] | None:
     file — and, inside ``take_lines``, per line.
     """
     try:
-        return _load_tiktoken_counter()
+        return load_tiktoken_counter()
     except Exception as exc:  # noqa: BLE001 — counting must never fail a review
         # Loading cl100k_base fetches its BPE file on first use, so an
         # egress-restricted runner lands here. Said out loud, because silently
