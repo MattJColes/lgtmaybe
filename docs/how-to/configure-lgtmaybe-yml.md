@@ -124,14 +124,14 @@ A second model for a review call the primary model cannot finish. It is off by
 default and adds no calls to a healthy review.
 
 Both models go through the same `provider`, `api_base` and credentials. An
-OpenRouter review can fall back from a Google model to a Qwen model, because
-OpenRouter serves both. An `openai` review cannot fall back to an Anthropic
+OpenRouter review can fall back from a Google model to an Anthropic model,
+because OpenRouter serves both. An `openai` review cannot fall back to an Anthropic
 account. Cross-provider failover needs a separate review run.
 
 ```yaml
 provider: openrouter
 model: google/gemini-3.8-flash
-fallback_model: qwen/qwen3.8-max
+fallback_model: anthropic/claude-sonnet-4.6
 ```
 
 When the fallback runs depends on the failure:
@@ -162,7 +162,7 @@ The `--fallback-model` flag and the Action's `fallback_model` input override
 the file:
 
 ```bash
-lgtmaybe review --fallback-model qwen/qwen3.8-max
+lgtmaybe review --fallback-model anthropic/claude-sonnet-4.6
 ```
 
 See [Choose a Review Model](choose-a-review-model.md) for current model results.

@@ -252,7 +252,7 @@ second model. So this does not reduce worst-case cost.
 ```yaml
 provider: openrouter
 model: google/gemini-3.7-flash
-fallback_model: qwen/qwen3.8-max
+fallback_model: anthropic/claude-sonnet-4.6
 ```
 
 Both models use the same configured provider and credentials. See
