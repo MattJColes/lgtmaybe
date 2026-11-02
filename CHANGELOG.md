@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.15.5](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.15.4...lgtmaybe-v2.15.5) (2026-11-02)
+
+
+### Bug Fixes
+
+* **docker:** bake tiktoken cl100k_base vocab into the image for air-gapped runs ([#876](https://github.com/MattJColes/lgtmaybe/issues/876)) ([03a8f4d](https://github.com/MattJColes/lgtmaybe/commit/03a8f4dd077c7f99ad32085f197a5a8e520d4a6b))
+* **gitea:** read INPUT_MAX_FILES and fail loudly on config-file-only inputs ([#875](https://github.com/MattJColes/lgtmaybe/issues/875)) ([34eb852](https://github.com/MattJColes/lgtmaybe/commit/34eb8523f7d9c5dcaf640fe0a9c73fb011023589))
+
+
+### Dependencies
+
+* bump the python-dependencies group with 10 updates ([#873](https://github.com/MattJColes/lgtmaybe/issues/873)) ([9ded3b0](https://github.com/MattJColes/lgtmaybe/commit/9ded3b0b2b0d1f5b8fadc9c93236d8dd1582c1b7))
+
 ## [2.15.4](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.15.3...lgtmaybe-v2.15.4) (2026-10-28)
 
 
