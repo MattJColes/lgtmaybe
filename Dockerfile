@@ -90,4 +90,12 @@ RUN uv sync --no-dev --frozen --extra azure --extra bedrock --extra vertex \
 
 ENV PATH="/app/.venv/bin:$PATH"
 
+# Bake the tokenizer vocab in, for air-gapped runners (#871). Token budgeting
+# (engine/compress.py) loads cl100k_base, which tiktoken otherwise downloads
+# from openaipublic.blob.core.windows.net on first use, every run, because the
+# container starts with an empty cache. litellm bundles the same file but no
+# longer sets TIKTOKEN_CACHE_DIR at import, so it cannot be relied on here.
+ENV TIKTOKEN_CACHE_DIR=/usr/share/tiktoken_cache
+RUN python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
+
 ENTRYPOINT ["python", "-m", "lgtmaybe"]
