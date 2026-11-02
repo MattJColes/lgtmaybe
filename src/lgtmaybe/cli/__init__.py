@@ -965,7 +965,6 @@ _ACTION_CONFIG_EXCLUSIONS = frozenset(
         "ignore_fingerprints",
         "include_paths",
         "max_file_diff_lines",
-        "max_files",
         "min_confidence",
         "min_severity",
         "project",
@@ -987,7 +986,23 @@ def action_inputs() -> dict[str, str | None]:
 
     GitHub sets ``INPUT_<NAME>`` for each input of a container action; empty
     strings (an unset optional input) are normalised to ``None``.
+
+    A config-file-only option set as ``INPUT_<NAME>`` fails loudly: Gitea and
+    Forgejo workflows write ``INPUT_*`` by hand, and ignoring one runs the
+    review with a default the user believes they changed (issue #870).
     """
+    misplaced = sorted(
+        f"INPUT_{name.upper()}"
+        for name in _ACTION_CONFIG_EXCLUSIONS
+        if os.environ.get(f"INPUT_{name.upper()}")
+    )
+    if misplaced:
+        raise click.ClickException(
+            f"{', '.join(misplaced)} is not an action input: set "
+            f"{', '.join(m.removeprefix('INPUT_').lower() for m in misplaced)} in "
+            ".lgtmaybe.yml on the base branch instead, and check that branch out "
+            "before the review step so lgtmaybe can read it."
+        )
     return {name: os.environ.get(f"INPUT_{name.upper()}") or None for name in _ACTION_INPUTS}
 
 

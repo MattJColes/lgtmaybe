@@ -38,12 +38,32 @@ def test_pull_requests_run_the_base_branch_workflow() -> None:
     assert "'pull_request'" not in condition
 
 
+def _step(job: dict[str, Any], name: str) -> dict[str, Any]:
+    (step,) = (step for step in job["steps"] if step["name"] == name)
+    return step
+
+
 def test_the_job_never_checks_out_or_runs_pull_request_code() -> None:
     (job,) = _load()["jobs"].values()
 
+    assert [step["name"] for step in job["steps"]] == ["Check out the base branch", "Review"]
     for step in job["steps"]:
         assert "uses" not in step, "no actions, so no checkout of the pull request head"
-        assert step["run"] == "python -m lgtmaybe action"
+        assert "head" not in str(step), "nothing from the pull request's head commit"
+    assert _step(job, "Review")["run"] == "python -m lgtmaybe action"
+
+
+def test_the_checkout_fetches_only_the_base_branch() -> None:
+    """Issue #870: config-file-only options (max_files...) need .lgtmaybe.yml on
+    disk, so the job fetches the base branch, the same tree that holds this
+    workflow, and nothing else."""
+    (job,) = _load()["jobs"].values()
+    checkout = _step(job, "Check out the base branch")
+
+    assert checkout["env"]["BASE_REF"] == (
+        "${{ github.event.pull_request.base.ref || github.event.repository.default_branch }}"
+    )
+    assert '"$BASE_REF"' in checkout["run"]
 
 
 def test_the_token_comes_from_a_secret_name_gitea_accepts() -> None:
@@ -53,7 +73,7 @@ def test_the_token_comes_from_a_secret_name_gitea_accepts() -> None:
     scoped token the guide asks for.
     """
     (job,) = _load()["jobs"].values()
-    env = job["steps"][0]["env"]
+    env = _step(job, "Review")["env"]
 
     secret = re.fullmatch(r"\$\{\{ secrets\.(\w+) \}\}", env["GITEA_TOKEN"])
     assert secret, "the token is read from a repository secret"
