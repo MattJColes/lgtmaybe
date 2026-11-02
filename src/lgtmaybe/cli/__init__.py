@@ -997,8 +997,9 @@ def action_inputs() -> dict[str, str | None]:
         if os.environ.get(f"INPUT_{name.upper()}")
     )
     if misplaced:
+        verb = "are not action inputs" if len(misplaced) > 1 else "is not an action input"
         raise click.ClickException(
-            f"{', '.join(misplaced)} is not an action input: set "
+            f"{', '.join(misplaced)} {verb}: set "
             f"{', '.join(m.removeprefix('INPUT_').lower() for m in misplaced)} in "
             ".lgtmaybe.yml on the base branch instead, and check that branch out "
             "before the review step so lgtmaybe can read it."

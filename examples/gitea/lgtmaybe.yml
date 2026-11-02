@@ -54,7 +54,8 @@ jobs:
       # The base branch only, never the pull request's head, so lgtmaybe can
       # read your .lgtmaybe.yml. Options with no INPUT_* variable (min_severity,
       # path filters...) live there. git rather than
-      # actions/checkout, because the lgtmaybe image has no Node.js.
+      # actions/checkout, because the lgtmaybe image has no Node.js. A /review
+      # comment carries no base ref, so it reads the default branch's config.
       - name: Check out the base branch
         run: |
           auth=$(printf 'x-access-token:%s' "$JOB_TOKEN" | base64 -w0)

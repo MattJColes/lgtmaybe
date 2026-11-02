@@ -63,7 +63,8 @@ block, for example `INPUT_MAX_FILES: "200"`. The names match the
 Every other option, such as `min_severity` or the path filters,
 goes in [`.lgtmaybe.yml`](configure-lgtmaybe-yml.md) on the base branch. The
 example's first step checks that branch out, never the pull request's head, so
-lgtmaybe can read the file. Setting one of these as an `INPUT_*` variable, for
+lgtmaybe can read the file. A run triggered by a `/review` comment has no base
+branch in its event, so it reads the file from the default branch instead. Setting one of these as an `INPUT_*` variable, for
 example `INPUT_MIN_SEVERITY`, fails the run with a message naming the file, rather
 than reviewing with the default.
 

@@ -821,6 +821,26 @@ class TestActionRouting:
         assert f"INPUT_{name.upper()}" in result.output
         assert ".lgtmaybe.yml" in result.output
 
+    def test_empty_config_file_only_input_is_unset_not_misplaced(self, monkeypatch):
+        """An empty INPUT_* is how an unset optional input arrives, so it must
+        not trip the misplaced-input guard."""
+        from lgtmaybe.cli import action_inputs
+
+        monkeypatch.setenv("INPUT_MIN_SEVERITY", "")
+        assert "min_severity" not in action_inputs()
+
+    def test_several_misplaced_inputs_are_named_in_one_plural_message(self, monkeypatch):
+        """Two misplaced INPUT_* vars read as a plural, not 'X, Y is not an action input'."""
+        import click
+
+        from lgtmaybe.cli import action_inputs
+
+        monkeypatch.setenv("INPUT_MIN_SEVERITY", "high")
+        monkeypatch.setenv("INPUT_INCLUDE_PATHS", "src/**")
+        with pytest.raises(click.ClickException) as exc:
+            action_inputs()
+        assert "INPUT_INCLUDE_PATHS, INPUT_MIN_SEVERITY are not action inputs" in str(exc.value)
+
     def test_action_inputs_are_derived_from_review_config(self):
         """`action_inputs()` reads a written-out name list, not ReviewConfig's fields.
 
