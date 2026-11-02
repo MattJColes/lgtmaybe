@@ -704,7 +704,8 @@ class TestActionRouting:
         assert captured == {"fail_on": "high"}
 
     def test_num_ctx_and_max_input_tokens_inputs_reach_config(self, tmp_path, monkeypatch):
-        """INPUT_NUM_CTX / INPUT_MAX_INPUT_TOKENS tune a big-diff run from the Action."""
+        """INPUT_NUM_CTX / INPUT_MAX_INPUT_TOKENS / INPUT_MAX_FILES tune a big-diff
+        run from the Action (max_files: issue #870, set by hand on Gitea)."""
         captured: dict[str, object] = {}
 
         import lgtmaybe.cli as cli_module
@@ -712,6 +713,7 @@ class TestActionRouting:
         def fake_build(cfg, runtime):
             captured["num_ctx"] = cfg.request.num_ctx
             captured["max_input_tokens"] = cfg.batching.max_input_tokens
+            captured["max_files"] = cfg.batching.max_files
             return FakeGitHub(), FakeEngine(FakeProvider()), FakeProvider()
 
         monkeypatch.setattr(cli_module, "build_review_context", fake_build)
@@ -726,11 +728,12 @@ class TestActionRouting:
         monkeypatch.setenv("INPUT_MODEL", "llama3")
         monkeypatch.setenv("INPUT_NUM_CTX", "32768")
         monkeypatch.setenv("INPUT_MAX_INPUT_TOKENS", "250000")
+        monkeypatch.setenv("INPUT_MAX_FILES", "200")
 
         result = CliRunner().invoke(main, ["action"])
 
         assert result.exit_code == 0, result.output
-        assert captured == {"num_ctx": 32768, "max_input_tokens": 250000}
+        assert captured == {"num_ctx": 32768, "max_input_tokens": 250000, "max_files": 200}
 
     def test_config_path_input_selects_the_repo_config(self, tmp_path, monkeypatch):
         """INPUT_CONFIG_PATH points the run at a custom repo config file."""
@@ -789,6 +792,54 @@ class TestActionRouting:
 
         monkeypatch.setenv("INPUT_CONFIG_PATH", "")
         assert action_inputs()["config_path"] is None
+
+    @pytest.mark.parametrize("name", ["min_severity", "include_paths"])
+    def test_config_file_only_input_fails_loudly(self, tmp_path, monkeypatch, name):
+        """Issue #870: a hand-written Gitea workflow set an INPUT_* var lgtmaybe
+        does not read, and the review ran with the default. A config-file-only
+        option set as an INPUT_* var must fail before any model call, naming
+        where the option does live."""
+        import lgtmaybe.cli as cli_module
+
+        def fake_build(cfg, runtime):
+            raise AssertionError("review must not start")
+
+        monkeypatch.setattr(cli_module, "build_review_context", fake_build)
+        event = _write_event(
+            tmp_path,
+            {"repository": {"full_name": "org/repo"}, "pull_request": {"number": 1}},
+        )
+        monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+        monkeypatch.setenv("INPUT_PROVIDER", "ollama")
+        monkeypatch.setenv("INPUT_MODEL", "llama3")
+        monkeypatch.setenv(f"INPUT_{name.upper()}", "200")
+
+        result = CliRunner().invoke(main, ["action"])
+
+        assert result.exit_code != 0
+        assert f"INPUT_{name.upper()}" in result.output
+        assert ".lgtmaybe.yml" in result.output
+
+    def test_empty_config_file_only_input_is_unset_not_misplaced(self, monkeypatch):
+        """An empty INPUT_* is how an unset optional input arrives, so it must
+        not trip the misplaced-input guard."""
+        from lgtmaybe.cli import action_inputs
+
+        monkeypatch.setenv("INPUT_MIN_SEVERITY", "")
+        assert "min_severity" not in action_inputs()
+
+    def test_several_misplaced_inputs_are_named_in_one_plural_message(self, monkeypatch):
+        """Two misplaced INPUT_* vars read as a plural, not 'X, Y is not an action input'."""
+        import click
+
+        from lgtmaybe.cli import action_inputs
+
+        monkeypatch.setenv("INPUT_MIN_SEVERITY", "high")
+        monkeypatch.setenv("INPUT_INCLUDE_PATHS", "src/**")
+        with pytest.raises(click.ClickException) as exc:
+            action_inputs()
+        assert "INPUT_INCLUDE_PATHS, INPUT_MIN_SEVERITY are not action inputs" in str(exc.value)
 
     def test_action_inputs_are_derived_from_review_config(self):
         """`action_inputs()` reads a written-out name list, not ReviewConfig's fields.
