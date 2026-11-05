@@ -274,7 +274,7 @@ each push, so every section tracks the head commit. To opt out of the whole
 comment, set the input in your workflow:
 
 ```yaml
-      - uses: MattJColes/lgtmaybe@v2
+      - uses: MattJColes/lgtmaybe@v3
         with:
           provider: anthropic
           model: claude-sonnet-4-6

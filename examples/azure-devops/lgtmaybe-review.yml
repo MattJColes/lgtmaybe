@@ -34,7 +34,7 @@ jobs:
             -e BUILD_REPOSITORY_NAME -e BUILD_REPOSITORY_PROVIDER \
             -e SYSTEM_PULLREQUEST_PULLREQUESTID \
             -e SYSTEM_ACCESSTOKEN -e ANTHROPIC_API_KEY \
-            ghcr.io/mattjcoles/lgtmaybe:v2 \
+            ghcr.io/mattjcoles/lgtmaybe:v3 \
             azure-pipelines --provider anthropic --model claude-sonnet-4-6
         displayName: lgtmaybe review
         env:

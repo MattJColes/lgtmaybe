@@ -56,7 +56,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7 # base repository only
-      - uses: MattJColes/lgtmaybe@v2
+      - uses: MattJColes/lgtmaybe@v3
         with:
           github_identity: lgtmaybe
           provider: openai
@@ -122,7 +122,7 @@ permissions:
 
 steps:
   - uses: actions/checkout@v7
-  - uses: MattJColes/lgtmaybe@v2
+  - uses: MattJColes/lgtmaybe@v3
     with:
       provider: openai
       model: gpt-5.5

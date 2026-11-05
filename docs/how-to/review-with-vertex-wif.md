@@ -56,7 +56,7 @@ permissions:
 The review step is:
 
 ```yaml
-- uses: MattJColes/lgtmaybe@v2
+- uses: MattJColes/lgtmaybe@v3
   with:
     provider: vertex
     model: gemini-3.8-flash

@@ -20,9 +20,9 @@ everywhere:
 - **GHCR image and Action tags**, through the reusable
   `.github/workflows/release.yml`, using the built-in `GITHUB_TOKEN`.
     - It pushes a multi-arch (amd64, arm64) image tagged `X.Y.Z`, `vX`
-      (currently `v2`), and `latest`.
+      (currently `v3`), and `latest`.
     - It moves the git tags `vX.Y.Z`, `vX`, and `lgtmaybe-vX` to the release
-      commit, so workflows can use `MattJColes/lgtmaybe@v2`.
+      commit, so workflows can use `MattJColes/lgtmaybe@v3`.
 - **Homebrew**, through `.github/workflows/homebrew.yml`, after the PyPI job
   succeeds (described below).
 - **Windows**, through two workflows:

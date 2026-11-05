@@ -59,7 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: MattJColes/lgtmaybe@v2
+      - uses: MattJColes/lgtmaybe@v3
         with:
           provider: vertex
           model: gemini-3.8-flash

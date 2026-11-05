@@ -49,7 +49,7 @@ jobs:
         contains(github.event.comment.body, '/diagram')))
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/mattjcoles/lgtmaybe:v2
+      image: ghcr.io/mattjcoles/lgtmaybe:v3
     steps:
       # The base branch only, never the pull request's head, so lgtmaybe can
       # read your .lgtmaybe.yml. Options with no INPUT_* variable (min_severity,
