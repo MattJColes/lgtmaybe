@@ -10,10 +10,9 @@ Reflection audits every merged finding in one call and is told to arbitrate
 guarantee also holds under ``--no-reflect`` and can be tested without a model.
 
 The precedence ladder is :data:`PRECEDENCE` — correctness, security,
-performance, tests, architecture, complexity, ponytail — taken from Ponytail 5's
-review order (correctness, safety, load, tests, speed, leanness) with design
-slotted above readability, so the lens that cuts code always yields to the one
-that fixes or restructures it. Only pairs declared in
+performance, tests, complexity, ponytail — taken from Ponytail 5's review order
+(correctness, safety, load, tests, speed, leanness), so the lens that cuts code
+always yields to the one that fixes it. Only pairs declared in
 :data:`OPPOSED` are ever arbitrated: a group id, an unattributed finding, a
 custom or pack lens, or a scanner hit declares no opposition, and the backstop
 never guesses one.
@@ -33,7 +32,6 @@ PRECEDENCE: tuple[ReviewCategory, ...] = (
     ReviewCategory.security,
     ReviewCategory.performance,
     ReviewCategory.tests,
-    ReviewCategory.architecture,
     ReviewCategory.complexity,
     ReviewCategory.ponytail,
 )
@@ -44,8 +42,6 @@ OPPOSED: frozenset[frozenset[ReviewCategory]] = frozenset(
     {
         frozenset({ReviewCategory.ponytail, ReviewCategory.correctness}),
         frozenset({ReviewCategory.ponytail, ReviewCategory.security}),
-        # "Put this behind the port" against "inline it": opposite directions.
-        frozenset({ReviewCategory.ponytail, ReviewCategory.architecture}),
     }
 )
 

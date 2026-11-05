@@ -287,8 +287,8 @@ docstrings.
 
 **Lenses**
 
-- **Presets** (`preset`): `fast` (default) covers all ten everyday categories in
-  five calls (`prompt.FAST_GROUPS`) on **every** provider: worker count decides
+- **Presets** (`preset`): `fast` (default) covers all nine everyday categories in
+  four calls (`prompt.FAST_GROUPS`) on **every** provider: worker count decides
   overlap, never call count. `full` runs one per category; `categories`
   overrides both.
 - **Concurrency:** one global `ThreadPoolExecutor` (`max_concurrency`, auto 6),
@@ -316,13 +316,6 @@ docstrings.
   collapses an existing port, layer or interface boundary**. A `shortcut:`
   comment is a recorded decision; that rule binds the advisory lenses only,
   never security or correctness.
-- **Architecture** (ceiling `medium`, `severity.CATEGORY_SEVERITY_CEILING`):
-  each finding opens with a change scenario; a principle's name is never the
-  justification. No new abstraction without a visible second variant or an
-  existing boundary; layers come from the repo's own paths, never invented.
-  Reflection protects it as a gap finding only when both ends of the
-  relationship are shown. Its own `fast` call, not a code-health member.
-  Lineage: `ATTRIBUTION.md`.
 - **Opposing advice is arbitrated, never posted together.** Lens prompts **never
   name each other** (it would couple them and lock out custom lenses). The
   shared never-cut rule bars any lens from recommending removal of
@@ -331,10 +324,9 @@ docstrings.
   keeps its own evidence bar (complexity extracts duplication only for uniform
   callers; `pack:design` spares port implementations).
   - `PRECEDENCE` (`engine/conflicts.py`): correctness → security → performance
-    → tests → architecture → complexity → ponytail (Ponytail 5's order, design
-    slotted above readability). It is rendered into the reflection prompt so
-    both referees rank alike.
-  - `OPPOSED`: ponytail against correctness, security and architecture.
+    → tests → complexity → ponytail (Ponytail 5's order). It is rendered into the
+    reflection prompt so both referees rank alike.
+  - `OPPOSED`: ponytail against correctness and security.
   - Reflection keeps the higher-ranked of two opposite recommendations only
     when both lenses are on the ladder; otherwise it keeps both.
   - `conflicts.resolve_conflicts`, the deterministic backstop after reflection
@@ -396,6 +388,11 @@ docstrings.
 - **Codebase humility (prompt rule):** the diff is a slice. Hedge cross-file
   absence claims and lower their severity; never assume what an unshown
   constant or collection *contains*.
+- **Worth raising (prompt rule):** an empty result is the expected answer, and
+  a finding is something a competent engineer would change before merging. The
+  shared rules, `injection._TASK_SUFFIX` and reflection's rule (d) hold the same
+  bar. Never reframe silence as the exception: the model obeys it, and invents
+  trivial fixes to avoid an empty answer. Measured by the `clean-change` fixture.
 - **Determinism:** `temperature` default `0.0`; `timeout` None is
   provider-aware.
 - **Finding rules** (`engine/rules.py`): declarative `drop` / `set_severity`
@@ -559,8 +556,8 @@ Where a check lives depends on whether it can be deterministic.
   bars**: parse, pooled recall (`--min-recall`) and clean (a fixture's
   `forbidden` findings must not appear). Plumbing is unit-tested in
   `tests/evals/`; per-lens coverage in `tests/evals/test_fixtures.py`.
-  Lens-specific fixtures: `counter-advice` (ponytail), `architecture`,
-  `spec-delivery`, `cross-file-fp` and `unshown-code-fp` (codebase humility),
+  Lens-specific fixtures: `counter-advice` (ponytail), `clean-change`
+  (staying silent), `spec-delivery`, `cross-file-fp` and `unshown-code-fp` (codebase humility),
   `cross-file-recall` (`--mid-review-retrieval`). A/B sweeps: `python -m
   evals.ab --sweep key=a,b`. Real-spend hosted e2e is label-gated in
   `action-e2e.yml`.

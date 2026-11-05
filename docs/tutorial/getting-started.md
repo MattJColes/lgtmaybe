@@ -200,9 +200,9 @@ lgtmaybe ran its pipeline over your local diff:
 2. **Filter:** skipped generated files, binaries, and lockfiles. It
    [redacted](../reference/glossary.md#redaction) anything that looked like a
    secret.
-3. **Review:** sent five concurrent model calls, one per concern: security,
-   correctness, code health, artefacts (tests and documentation), and
-   architecture. This is the default `fast`
+3. **Review:** sent four concurrent model calls, one per concern: security,
+   correctness, code health, and artefacts (tests and documentation). This is
+   the default `fast`
    [preset](../reference/glossary.md#preset). Each call asked for findings as
    JSON.
 4. **Parse and anchor:** validated each reply against the findings schema. It

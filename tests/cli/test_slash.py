@@ -540,8 +540,8 @@ class TestAskPromptIsNotAReviewPrompt:
     """`/ask` shows the diff as context for a question, so it must not carry the
     review task restatement.
 
-    `wrap_diff` appends "report problems ... as the JSON findings object ...
-    Return {"findings": []} only if there are genuinely no issues." That lands at
+    `wrap_diff` appends "review the changed lines ... as the JSON findings object
+    ... Return {"findings": []} when nothing clears the bar." That lands at
     the end of the user message, nearer the answer than `_ASK_SYSTEM`, and the
     model obeys the nearer instruction. `/ask` never showed this as a leak — its
     guard turns the JSON into `_ASK_FALLBACK` — so the symptom is the quieter one:

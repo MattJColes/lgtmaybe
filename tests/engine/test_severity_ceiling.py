@@ -32,9 +32,7 @@ def _finding(category: str, severity: Severity) -> ReviewFinding:
     )
 
 
-@pytest.mark.parametrize(
-    "category", ["complexity", "ponytail", "architecture", "documentation", "tests"]
-)
+@pytest.mark.parametrize("category", ["complexity", "ponytail", "documentation", "tests"])
 def test_an_advisory_lens_cannot_claim_more_than_its_ceiling(category: str) -> None:
     ceiling = CATEGORY_SEVERITY_CEILING[category]
 
@@ -85,7 +83,6 @@ def test_the_ceilings_cover_every_advisory_category_and_nothing_else() -> None:
     assert set(CATEGORY_SEVERITY_CEILING) == {
         ReviewCategory.complexity,
         ReviewCategory.ponytail,
-        ReviewCategory.architecture,
         ReviewCategory.documentation,
         ReviewCategory.tests,
     }

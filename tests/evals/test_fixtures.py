@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 import re
 import shutil
-from pathlib import Path
 
 import pytest
 
@@ -43,7 +42,6 @@ _FP_FIXTURES = [
     "test-harness",
     "unshown-code-fp",
     "counter-advice",
-    "architecture",
 ]
 
 _VIBE_FILES = {
@@ -69,7 +67,7 @@ def test_all_fixtures_load() -> None:
     assert fixtures, "no fixtures discovered"
     for diff, manifest in fixtures:
         assert diff.strip()
-        assert manifest.expected, f"{manifest.name} has no expected findings"
+        assert manifest.expected or manifest.forbidden, f"{manifest.name} checks nothing"
 
 
 def test_vibe_multifile_spans_all_reviewable_files() -> None:
@@ -667,15 +665,11 @@ def test_counter_advice_plants_a_lean_catch_beside_never_cut_traps() -> None:
     assert "implements the blobstore port" in labels
 
 
-def test_architecture_fixture_plants_design_catches_beside_restraint_traps() -> None:
-    """The architecture lens's recall pair (a domain module importing an adapter,
-    an override breaking its shown base contract) sits beside its two restraint
-    traps: a seam proposed for a single-caller private helper, and a Liskov claim
-    against a base class only the unshown corpus holds."""
-    _diff, manifest = _fixture("architecture")
-    expected = " ".join(e.label for e in manifest.expected).lower()
-    assert "adapter" in expected and "substitutability" in expected
-    forbidden = " ".join(f.label for f in manifest.forbidden).lower()
-    assert "one caller" in forbidden and "unshown" in forbidden
-    corpus = Path(__file__).parents[2] / "evals/fixtures/architecture/repo/billing"
-    assert (corpus / "rates.py").is_file() and (corpus / "adapters/stripe.py").is_file()
+def test_clean_change_fixture_plants_only_matter_of_taste_traps() -> None:
+    """Nothing here is wrong, so every finding is noise: this is the fixture that
+    measures whether a lens can stay silent. The tests ride in the diff so a
+    missing-test finding cannot be an honest answer either."""
+    diff, manifest = _fixture("clean-change")
+    assert manifest.expected == []
+    assert len(manifest.forbidden) == 3
+    assert "tests/billing/test_plans.py" in diff

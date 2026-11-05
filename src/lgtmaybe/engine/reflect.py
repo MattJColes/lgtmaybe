@@ -132,13 +132,7 @@ is an absence claim about code you cannot see, like any other: the coverage may 
 in an untouched file, so drop it unless the diff itself shows the absence (it deletes the \
 test, or it changes the very test file that fails to cover the new path).
 
-An architecture finding (coupling, dependency direction, broken substitutability, a \
-misuse-prone interface) is a gap type only when the relationship it names is in front of \
-you: an import line in the diff shows both ends of a dependency, but an override is judged \
-only against a base contract shown in the diff or the file text below. When either end is \
-unseen it is a cross-file claim like any other: keep it only if it hedges, at low severity.
-
-Also apply these three drop-rules:
+Also apply these four drop-rules:
 (a) Drop a finding that asserts library/cloud/framework SEMANTICS the diff does not itself \
 prove — "this SDK call swallows errors", "this API is rate-limited", "this ORM method runs \
 N+1 queries", "this decorator changes the return type". Unless the diff (or the file text \
@@ -150,6 +144,11 @@ slice, so a symbol a finding calls undefined often appears elsewhere in the same
 (c) Drop a finding claiming "this existing test will fail", "this needs a mock", or "the \
 patch target is wrong" — test-execution and mock/patch-target outcomes depend on the full \
 test harness you cannot see, so such a claim is speculative.
+(d) Drop a finding whose fix is not worth the churn: it would leave behaviour, risk, and \
+maintenance cost practically unchanged, such as swapping one acceptable form for another or \
+guarding a case the shown code rules out. Ask whether a competent engineer would change the \
+code before merging because of it. This rule never drops a finding that shows an observable \
+defect.
 
 """
     + _ARBITRATION_RULE

@@ -27,7 +27,6 @@ It checks for:
 - **Tests and documentation:** missing or weak tests, stale comments, and undocumented APIs.
 - **Intent:** whether the change does what its title, description, and commits say.
 - **Ponytail:** code you don't need, and simpler or standard-library ways to do the job.
-- **Architecture:** coupling, wrong-way dependencies, and broken subclass contracts that will be hard to undo.
 
 Each [finding](reference/glossary.md#finding) is graded `info` to `critical`
 and lands on its changed line. A clean change gets a 👍 **LGTM!**.

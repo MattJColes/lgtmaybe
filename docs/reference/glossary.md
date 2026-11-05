@@ -21,13 +21,6 @@ miscount line numbers, so lgtmaybe finds the line whose text matches the anchor
 and posts the comment there. If no changed line matches, the finding moves into
 the review summary instead of landing on the wrong line.
 
-## Architecture Lens
-
-The [lens](#lens) that asks what a change will make hard to change later. It
-looks for coupling across boundaries, dependencies that point the wrong way,
-subclasses that break their base class, and APIs that are easy to misuse. Each
-of its findings opens with the change that would become painful.
-
 ## Batch
 
 A group of changed files sent to the model together. lgtmaybe sizes each batch
@@ -131,7 +124,7 @@ One focused review question for the model. Under the default
 [preset](#preset), some lenses share a model call; under `full`, each gets its
 own. The built-in lenses
 cover security, correctness, tests, documentation, performance, complexity,
-needless code ([ponytail](#ponytail)), architecture, intent, specs and
+needless code ([ponytail](#ponytail)), intent, specs and
 deprecated APIs. You can add your own. See
 [What gets reviewed](../explanation/what-gets-reviewed.md).
 
@@ -164,7 +157,7 @@ you never wrote."
 ## Preset
 
 How many model calls a review spends. `fast`, the default, covers every everyday
-[lens](#lens) in five calls. `full` gives each lens its own call, for deeper
+[lens](#lens) in four calls. `full` gives each lens its own call, for deeper
 audits.
 
 ## Prompt Cache

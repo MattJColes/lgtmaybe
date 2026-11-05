@@ -592,13 +592,13 @@ class TestStdioProcess:
 def test_the_preset_argument_states_the_fast_call_count() -> None:
     """An MCP client reads this description to choose a preset, so it must match the engine.
 
-    `fast` runs five calls (security, correctness, code health, artefacts,
-    architecture), plus one more when a committed spec matches.
+    `fast` runs four calls (security, correctness, code health, artefacts),
+    plus one more when a committed spec matches.
     """
     import typing
 
     from lgtmaybe.cli.mcp_server import _PresetArg
 
     (field,) = typing.get_args(_PresetArg)[1:]
-    assert "fast: five model calls" in field.description
-    assert "four" not in field.description
+    assert "fast: four model calls" in field.description
+    assert "five" not in field.description

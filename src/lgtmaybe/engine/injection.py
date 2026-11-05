@@ -86,9 +86,9 @@ INJECTION_PREAMBLE = (
 # the shape restated here MUST match it (a findings object, never a bare array):
 # a contradictory last instruction degrades small-model compliance.
 _TASK_SUFFIX = (
-    "\n\nNow report problems in the changed lines (those starting with + or -) above "
-    "as the JSON findings object described in the system instructions. Return "
-    '{"findings": []} only if there are genuinely no issues.'
+    "\n\nNow review the changed lines (those starting with + or -) above and answer "
+    "with the JSON findings object described in the system instructions. Return "
+    '{"findings": []} when nothing clears the bar set there.'
 )
 
 # Lead-in for the stated-intent block. Same posture as the diff: data to judge,

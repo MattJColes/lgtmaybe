@@ -31,7 +31,6 @@ def test_homepage_overview_is_concise_without_hiding_features() -> None:
         "deprecations",
         "intent",
         "ponytail",
-        "architecture",
     ):
         assert feature in overview
 

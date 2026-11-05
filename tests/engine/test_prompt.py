@@ -8,6 +8,7 @@ import pytest
 
 from lgtmaybe.core.models import CustomLens, ReviewCategory, ReviewFinding, Severity
 from lgtmaybe.engine import prompt as prompt_module
+from lgtmaybe.engine.injection import wrap_diff
 from lgtmaybe.engine.prompt import (
     build_custom_lens_block,
     build_lens_block,
@@ -58,7 +59,6 @@ _SIGNATURE = {
     ReviewCategory.complexity: "cyclomatic",
     ReviewCategory.intent: "stated intent",
     ReviewCategory.ponytail: "yagni",
-    ReviewCategory.architecture: "liskov",
     ReviewCategory.spec: "committed-specification",
 }
 
@@ -112,7 +112,6 @@ def test_defect_examples_include_a_failure_scenario(category: ReviewCategory) ->
         ReviewCategory.complexity,
         ReviewCategory.intent,
         ReviewCategory.ponytail,
-        ReviewCategory.architecture,
     ],
 )
 def test_gap_examples_use_a_null_failure_scenario(category: ReviewCategory) -> None:
@@ -412,7 +411,7 @@ def test_shared_preamble_never_cuts_protective_code() -> None:
     assert "every edge case" in preamble
 
 
-_ADVISORY = (ReviewCategory.complexity, ReviewCategory.ponytail, ReviewCategory.architecture)
+_ADVISORY = (ReviewCategory.complexity, ReviewCategory.ponytail)
 
 
 @pytest.mark.parametrize("category", list(ReviewCategory), ids=lambda c: c.value)
@@ -1014,40 +1013,20 @@ class TestProjectContext:
         assert block in preamble
 
 
-def test_prompt_asks_for_architecture_review() -> None:
-    """The architecture lens: what will this change make hard to change?"""
-    block = build_lens_block(ReviewCategory.architecture).lower()
-    for term in (
-        "expensive to reverse",  # Booch / Johnson: architecture is cost of change
-        "change scenario",  # every finding names one
-        "coupling",
-        "dependency direction",
-        "liskov",
-        "substitut",
-        "sharp edges",
-        "misuse",
-        "port",
-    ):
-        assert term in block, term
+def test_an_empty_result_is_the_expected_answer() -> None:
+    """A lens told to speak unless nothing is wrong will find something to say.
+    Silence has to read as a correct outcome, at the top and at the very end."""
+    preamble = build_shared_preamble().lower()
+    assert "correct answer" in preamble
+    assert "genuinely no issues" not in preamble
+    assert "genuinely no issues" not in wrap_diff("+x = 1").lower()
 
 
-def test_architecture_proposes_no_abstraction_without_evidence() -> None:
-    """Its own evidence bar, with no mention of any sibling lens: a new seam needs a
-    visible second variant or an existing boundary, and a principle is a label."""
-    block = build_lens_block(ReviewCategory.architecture).lower()
-    assert "second variant" in block
-    assert "existing boundary" in block
-    assert "label, not" in block
-    for sibling in ("ponytail", "yagni", "complexity lens"):
-        assert sibling not in block, sibling
-
-
-def test_architecture_example_points_a_dependency_outward() -> None:
-    """The worked example is the most uniquely architectural shape: a domain module
-    importing an adapter, with the change scenario leading the body."""
-    block = build_lens_block(ReviewCategory.architecture)
-    assert "from billing.adapters.stripe import StripeClient" in block
-    assert '"suggestion": null' in block
+def test_every_finding_must_clear_the_same_bar() -> None:
+    """Being true is not enough: the bar is whether it is worth changing."""
+    preamble = build_shared_preamble().lower()
+    assert "change the code before merging" in preamble
+    assert "one acceptable form for another" in preamble
 
 
 def test_findings_are_written_for_any_engineer() -> None:

@@ -69,3 +69,9 @@ quality.conflicts:
     kind: function_definition
     has: { field: name, regex: '^resolve_conflicts$' }
   files: [src/lgtmaybe/engine/**/*.py]
+
+quality.worth-the-churn:
+  rule:
+    kind: assignment
+    has: { field: left, regex: '^_REFLECT_SYSTEM$' }
+  files: [src/lgtmaybe/engine/reflect.py]

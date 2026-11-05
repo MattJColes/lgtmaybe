@@ -90,23 +90,22 @@ sourced from PR-author content.
 - **THEN** it runs as one more concurrent lens call, findings merged like any
   built-in
 
-### Requirement: Fast preset is five distinct lenses on every provider
+### Requirement: Fast preset is four distinct lenses on every provider
 
-The default `fast` preset SHALL run every everyday category as FIVE lenses —
-security, correctness, code health, artefacts, and architecture — one per
-concern. The lens set SHALL NOT vary with the number of available workers: a
-single-worker configuration runs the same five calls serially. Stated intent
+The default `fast` preset SHALL run every everyday category as FOUR lenses —
+security, correctness, code health, and artefacts — one per concern. The lens set SHALL NOT vary with the number of available workers: a
+single-worker configuration runs the same four calls serially. Stated intent
 SHALL fold into the correctness call rather than consume its own.
 <!-- anchor: prompt.groups -->
 
 #### Scenario: cloud default
 - **WHEN** `fast` uses a cloud provider with auto-concurrency
-- **THEN** its five calls are security, correctness, code health, artefacts, and
-  architecture, and they may overlap
+- **THEN** its four calls are security, correctness, code health, and artefacts,
+  and they may overlap
 
 #### Scenario: local single-slot default
 - **WHEN** `fast` uses Ollama with auto-concurrency
-- **THEN** the same five calls run within the single-worker pool, serially
+- **THEN** the same four calls run within the single-worker pool, serially
 
 #### Scenario: intent with no dedicated call
 - **WHEN** the fast preset runs and the PR states an intent
@@ -181,7 +180,7 @@ shared cacheable prefix for every lens. Nothing hidden SHALL emit no block.
 Every built-in review prompt SHALL request a nullable `failure_scenario`.
 Security, correctness, deprecation, and performance findings SHALL describe a
 concrete trigger, the changed behaviour, and its observable impact regardless
-of severity; tests, documentation, complexity, intent, ponytail, and architecture findings
+of severity; tests, documentation, complexity, intent, and ponytail findings
 SHALL return `null` rather than invent a causal story.
 <!-- anchor: prompt.failure-scenario -->
 
@@ -299,24 +298,19 @@ lenses only.
 - **WHEN** the diff marks an unsafe call with a `shortcut:` comment
 - **THEN** only the advisory lens prompts treat it as a recorded decision; the security prompt has no such rule
 
-### Requirement: Architecture findings name a change scenario
+### Requirement: An empty review is the expected outcome
 
-The architecture lens SHALL flag only design decisions the diff introduces that
-are expensive to reverse, and its prompt SHALL require every finding to open
-with a concrete change scenario rather than a principle's name. It SHALL NOT
-propose a new abstraction without a visible second variant or an existing
-boundary, and it is graded `info` to `medium` (clamped there by the severity
-ceiling).
-<!-- anchor: prompt.architecture -->
+The shared review rules SHALL state that an empty result is the expected answer
+when a change has nothing worth raising, and SHALL hold every lens to one bar: a
+finding is something a competent engineer would change before merging. No lens
+SHALL raise a change that only swaps one acceptable form for another. The rule
+SHALL NOT weaken a security or correctness finding that shows a concrete defect.
+<!-- anchor: prompt.worth-raising -->
 
-#### Scenario: a domain module imports an adapter
-- **WHEN** domain code adds an import from an existing adapters package
-- **THEN** the lens may flag the outward dependency, leading with what that import makes painful to change
+#### Scenario: a correct change with a matter-of-taste alternative
+- **WHEN** a change is correct and the only available comment is a preference
+- **THEN** the lens returns `{"findings": []}`
 
-#### Scenario: a single-caller private helper
-- **WHEN** the diff adds a private helper with one caller
-- **THEN** the lens proposes no interface or abstraction for it
-
-#### Scenario: an override whose base class is unshown
-- **WHEN** a subclass overrides a method of a base class the diff does not show
-- **THEN** any substitutability claim is hedged at `info` or `low`, and reflection judges it as a cross-file claim
+#### Scenario: a small change with a real bug
+- **WHEN** a one-line change introduces a concrete defect
+- **THEN** the bar does not stop the lens reporting it
