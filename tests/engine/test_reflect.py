@@ -956,18 +956,15 @@ def test_the_auditor_arbitrates_only_ranked_categories() -> None:
     assert "not on this ladder, keep both" in _REFLECT_SYSTEM
 
 
-def test_reflect_prompt_protects_architecture_findings_only_when_the_relationship_is_shown() -> (
-    None
-):
-    """A coupling or substitutability claim is a gap type only when both ends of the
-    relationship are in front of the auditor; otherwise it is exactly the cross-file
-    guess the drop-rule exists for."""
+def test_reflect_prompt_drops_fixes_not_worth_the_churn() -> None:
+    """Reflection is the check that is not under a lens's "find X" mandate, so it
+    repeats the bar. A shown defect must stay safe from it."""
     from lgtmaybe.engine.reflect import _REFLECT_SYSTEM
 
     system = _REFLECT_SYSTEM.lower()
-    assert "architecture finding" in system
-    assert "both ends" in system
-    assert "base contract" in system
+    assert "not worth the churn" in system
+    assert "one acceptable form for another" in system
+    assert "never drops a finding that shows an observable defect" in system
 
 
 # ---------------------------------------------------------------------------

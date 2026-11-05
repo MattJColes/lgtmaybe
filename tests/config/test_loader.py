@@ -6,9 +6,13 @@ provider or model: with neither set by any layer, loading fails clearly.
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
+from lgtmaybe.config import loader
 from lgtmaybe.config.loader import ProviderNotConfigured, load_config
+from lgtmaybe.core.models import ReviewCategory
 
 
 def test_empty_file_without_provider_is_not_configured(tmp_path):
@@ -458,3 +462,32 @@ def test_cli_severity_floor_beats_the_project_default(tmp_path):
     cfg = load_config(config_path=cfg_file, min_severity="low")
 
     assert cfg.min_severity == "low"
+
+
+def test_a_config_listing_the_removed_architecture_lens_still_loads(tmp_path) -> None:
+    """Action tags float, so a removed lens must not turn a release into red CI."""
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text(
+        "provider: ollama\nmodel: llama3\ncategories: [security, architecture]\n",
+        encoding="utf-8",
+    )
+    records: list[logging.LogRecord] = []
+    handler = logging.Handler()
+    handler.emit = records.append  # type: ignore[method-assign]
+    loader._log.addHandler(handler)
+    try:
+        cfg = load_config(config_path=cfg_file)
+    finally:
+        loader._log.removeHandler(handler)
+
+    assert cfg.categories == [ReviewCategory.security]
+    assert any("architecture" in r.getMessage() for r in records)
+
+
+def test_an_unknown_category_is_still_rejected(tmp_path) -> None:
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text(
+        "provider: ollama\nmodel: llama3\ncategories: [architecure]\n", encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="architecure"):
+        load_config(config_path=cfg_file)

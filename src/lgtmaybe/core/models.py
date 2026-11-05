@@ -75,10 +75,6 @@ class ReviewCategory(StrEnum):
     ``ponytail`` is the "lazy senior dev" lens — the best code is the code you
     never wrote — flagging code that needn't exist at all (YAGNI, reach for the
     standard library, do it in fewer lines).
-    ``architecture`` flags design decisions the diff introduces that are
-    expensive to reverse — coupling across boundaries, dependency direction,
-    broken substitutability, misuse-prone public surface — each tied to a
-    concrete change scenario.
     ``spec`` checks the diff against a specification the repository commits
     (OpenSpec, GitHub Spec Kit, Kiro); like ``intent`` it only runs when there is
     something to check against — here, a detected spec that matches the PR.
@@ -93,18 +89,17 @@ class ReviewCategory(StrEnum):
     complexity = "complexity"
     intent = "intent"
     ponytail = "ponytail"
-    architecture = "architecture"
     spec = "spec"
 
 
 class ReviewPreset(StrEnum):
     """How many model calls a review spends: the everyday path or the deep audit.
 
-    ``fast`` (the default) covers all ten everyday categories in FIVE calls,
+    ``fast`` (the default) covers all nine everyday categories in FOUR calls,
     one per concern: security, correctness (with stated intent folded in), code
-    health, artefacts (tests + documentation), and architecture. The same five
-    run on every provider — worker count changes the schedule, not the call
-    count. A matched spec adds a sixth.
+    health, and artefacts (tests + documentation). The same four run on every
+    provider — worker count changes the schedule, not the call count. A matched
+    spec adds a fifth.
     ``full`` runs each category as its own call for release
     branches and deep audits. An explicit ``categories`` list always wins over
     the preset.
@@ -1179,7 +1174,7 @@ class ReviewConfig(_Strict):
     # default, but gated on DETECTION: no spec system in the workspace, or no
     # spec matching this PR, and the lens is dropped before the fan-out, so a
     # repository without specs pays no call and no prompt bytes. When it does
-    # run it is a lens of its own (a sixth call under the fast preset).
+    # run it is a lens of its own (a fifth call under the fast preset).
     spec_review: bool = True
     # Extra directory globs to search for specs, for a house layout the three
     # known systems do not describe (e.g. `docs/rfcs/*`). Each match is treated
@@ -1287,11 +1282,10 @@ class ReviewConfig(_Strict):
     # Azure DevOps and Gitea 1.26+; ignored by the local CLI review, which has no
     # conversations to resolve.
     resolve_fixed: bool = True
-    # Call-count preset (see ReviewPreset): `fast` (default) covers all ten
-    # everyday categories in five calls, one per concern — security,
-    # correctness, code health, artefacts, architecture — the same five on
-    # every provider; `full` runs one call per lens. An explicit `categories`
-    # list overrides it.
+    # Call-count preset (see ReviewPreset): `fast` (default) covers all nine
+    # everyday categories in four calls, one per concern — security,
+    # correctness, code health, artefacts — the same four on every provider;
+    # `full` runs one call per lens. An explicit `categories` list overrides it.
     preset: ReviewPreset = ReviewPreset.fast
     # Review lenses to run. Each is asked in its own concurrent LLM call and the
     # findings are merged + deduped. Defaults to all of them (grouped per the

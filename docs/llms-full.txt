@@ -33,7 +33,6 @@ It checks for:
 - **Tests and documentation:** missing or weak tests, stale comments, and undocumented APIs.
 - **Intent:** whether the change does what its title, description, and commits say.
 - **Ponytail:** code you don't need, and simpler or standard-library ways to do the job.
-- **Architecture:** coupling, wrong-way dependencies, and broken subclass contracts that will be hard to undo.
 
 Each [finding](reference/glossary.md#finding) is graded `info` to `critical`
 and lands on its changed line. A clean change gets a 👍 **LGTM!**.
@@ -294,9 +293,9 @@ lgtmaybe ran its pipeline over your local diff:
 2. **Filter:** skipped generated files, binaries, and lockfiles. It
    [redacted](../reference/glossary.md#redaction) anything that looked like a
    secret.
-3. **Review:** sent five concurrent model calls, one per concern: security,
-   correctness, code health, artefacts (tests and documentation), and
-   architecture. This is the default `fast`
+3. **Review:** sent four concurrent model calls, one per concern: security,
+   correctness, code health, and artefacts (tests and documentation). This is
+   the default `fast`
    [preset](../reference/glossary.md#preset). Each call asked for findings as
    JSON.
 4. **Parse and anchor:** validated each reply against the findings schema. It
@@ -921,7 +920,7 @@ review question for the model, such as security or correctness. The
 
 | Input | Default | Description |
 |---|---|---|
-| `preset` | `fast` | `fast` runs five calls (security, correctness, code health, artefacts for tests and documentation, and architecture) on every provider; `full` runs one call per lens. An explicit `categories` list in `.lgtmaybe.yml` overrides it |
+| `preset` | `fast` | `fast` runs four calls (security, correctness, code health, and artefacts for tests and documentation) on every provider; `full` runs one call per lens. An explicit `categories` list in `.lgtmaybe.yml` overrides it |
 | `incremental` | auto | Review only the commits added since the last completed review on `synchronize` pushes, and the whole PR elsewhere. `true`/`false` forces it. Falls back to a full review after a force-push or when there is no earlier review. A push that only moves the PR onto a new base, leaving its diff unchanged, is skipped. A retargeted PR gets a full review. `/review full` forces a full re-review on demand |
 | `recursive` | `true` | Review a file whose diff exceeds `max_input_tokens` [hunk](../reference/glossary.md#hunk) by hunk instead of sending it whole. Set `false` to disable |
 | `spec_review` | `true` | Check the diff against a committed spec (OpenSpec, GitHub Spec Kit, Kiro). Runs only when a spec is detected and matches the PR, so a repository without specs pays nothing |
@@ -3803,7 +3802,7 @@ The review makes five lens calls under the default `fast`
 [preset](../reference/glossary.md#preset) (one per category under
 `--preset full`). On a single-slot server those queue rather than overlap. So a
 slow model takes roughly `lens calls × per-call time`. That is why `fast` is the
-default: five calls instead of one per category is the biggest single local
+default: four calls instead of one per category is the biggest single local
 speed-up.
 
 To go faster:
@@ -3814,8 +3813,8 @@ To go faster:
 - Give the server more GPU.
 - Let the server run requests in parallel, if you have the memory, as described
   [above](#concurrency-on-a-local-server). vLLM does this out of the box. On
-  ollama, `OLLAMA_NUM_PARALLEL=5` makes the same five calls overlap instead of
-  queueing, close to a 5× wall-clock win.
+  ollama, `OLLAMA_NUM_PARALLEL=4` makes the same four calls overlap instead of
+  queueing, close to a 4× wall-clock win.
 
 Add `--profile` to any run to see the per-call breakdown.
 
@@ -4296,8 +4295,8 @@ with a smaller context window. A value you set is used as is.
 ### preset
 
 How many model calls the review spends. A [preset](../reference/glossary.md#preset) groups the
-review's lenses into calls. `fast` (the default) covers the ten everyday
-categories in five calls, one per concern:
+review's lenses into calls. `fast` (the default) covers the nine everyday
+categories in four calls, one per concern:
 
 | Call | Covers |
 |---|---|
@@ -4305,10 +4304,9 @@ categories in five calls, one per concern:
 | correctness | correctness, plus stated intent when the PR states one |
 | code health | performance, complexity, ponytail, deprecation |
 | artefacts | tests, documentation |
-| architecture | architecture |
 
-The same five run on every provider. Worker count only changes whether they
-overlap. A sixth `spec` call runs when the repository commits a specification
+The same four run on every provider. Worker count only changes whether they
+overlap. A fifth `spec` call runs when the repository commits a specification
 that matches the PR (see [categories](#categories)).
 
 `full` runs one focused call per category, for release branches and deep
@@ -4329,7 +4327,7 @@ findings. Fewer categories means fewer calls and fewer tokens, at the cost of
 coverage.
 
 Choose from `security`, `correctness`, `deprecation`, `tests`, `documentation`,
-`performance`, `complexity`, `intent`, `ponytail`, `architecture` and `spec`.
+`performance`, `complexity`, `intent`, `ponytail` and `spec`.
 
 ```yaml
 categories:
@@ -4337,7 +4335,7 @@ categories:
   - correctness
 ```
 
-Default: all eleven. Two of them only run when there is something to check:
+Default: all ten. Two of them only run when there is something to check:
 
 - `intent` checks the diff against the PR's stated intent: title, description
   and commit names on GitHub, or your `git log` commit names on the CLI. With
@@ -4356,16 +4354,8 @@ wrote*. It flags code that needn't exist (YAGNI, reinventing the standard
 library, code that could be far shorter). See
 [What gets reviewed](../explanation/what-gets-reviewed.md#ponytail-the-laziest-senior-dev-in-the-room).
 
-`architecture` flags design decisions in the change that will be expensive to
-reverse:
-
-- coupling across boundaries
-- dependencies pointing the wrong way
-- subclasses that break their base class's contract
-- misuse-prone APIs
-
-Each finding has to open with the change it would make painful. See
-[What gets reviewed](../explanation/what-gets-reviewed.md#architecture-what-will-this-make-hard-to-change).
+The `architecture` lens no longer exists. lgtmaybe ignores it in `categories` and logs a
+warning. For review of structure, use the `pack:design` lens.
 
 ### context_lines
 
@@ -5107,19 +5097,17 @@ caching is now automatic wherever the provider supports it.
 # Add a Custom Review Lens (BYO Skills)
 
 A [lens](../reference/glossary.md#lens) is one focused review question for the
-model. lgtmaybe ships eleven built-in review lenses:
+model. lgtmaybe ships ten built-in review lenses:
 
 - security, correctness, deprecation, tests, documentation, performance,
   complexity, intent and spec;
-- `ponytail`, the "lazy senior dev", write-less-code lens;
-- `architecture`, for design decisions that will be expensive to reverse.
+- `ponytail`, the "lazy senior dev", write-less-code lens.
 
 A **custom lens** adds your own. It runs alongside the built-ins as its own
 focused model call, and its findings merge into the same review. Use one to
 enforce a house style or team convention the built-in lenses don't cover.
 
-A custom lens can't reuse a built-in id. So a lens you named `architecture`
-before it became built-in needs a new id.
+A custom lens can't reuse a built-in id.
 
 ## Contents
 
@@ -5136,8 +5124,8 @@ before it became built-in needs a new id.
 Every lens, built-in or custom, has the same shape: a focused set of
 instructions and one worked example. Each custom lens is sent as its own model
 call, so the model concentrates on a single concern. (Under the default `fast`
-[preset](../reference/glossary.md#preset), the built-in lenses share five calls,
-plus a sixth when a committed spec matches.
+[preset](../reference/glossary.md#preset), the built-in lenses share four calls,
+plus a fifth when a committed spec matches.
 Under `full`, each built-in gets its own call.) A custom lens has these
 fields:
 
@@ -6607,10 +6595,10 @@ input tokens  ≈  batches × calls per batch × (diff + context padding + hints
 ```
 
 - **Calls per batch.** The `fast` [preset](../reference/glossary.md#preset)
-  (the default) makes five core calls per batch: security, correctness, code
-  health, artefacts (tests and documentation) and architecture. Under `fast`,
+  (the default) makes four core calls per batch: security, correctness, code
+  health, and artefacts (tests and documentation). Under `fast`,
   the intent check folds into the correctness call. `full` makes one call per
-  built-in category, up to ten. A matching committed spec adds its own call.
+  built-in category, up to nine. A matching committed spec adds its own call.
   This is the biggest multiplier in the formula.
 - **Batches.** A diff larger than `max_input_tokens` is split, and each batch
   pays for the full lens [fan-out](../reference/glossary.md#fan-out) again.
@@ -6724,8 +6712,8 @@ That is two calls per batch instead of the default five. Keep the list short.
 An explicit list turns off the `fast` preset's grouping, so listing six
 categories costs six calls, not five.
 
-Otherwise keep the default `fast` preset. `preset: full` doubles the call
-count (up to ten calls per batch instead of five) for a modest recall gain.
+Otherwise keep the default `fast` preset. `preset: full` more than doubles the
+call count (up to nine calls per batch instead of four) for a modest recall gain.
 
 ### 5. Review Less
 
@@ -7447,7 +7435,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `auto_describe` | boolean | No | `True` | Auto Describe |
 | `auto_diagram` | boolean | No | `True` | Auto Diagram |
 | `batching` | BatchingConfig | No | `{'include_paths': [], 'exclude_paths': [], 'max_files': 50, 'max_file_diff_lines': 2000, 'max_input_tokens': 100000, 'recursive': True, 'context_lines': 20, 'function_context': True}` |  |
-| `categories` | list[`architecture` / `complexity` / `correctness` / `deprecation` / `documentation` / `intent` / `performance` / `ponytail` / `security` / `spec` / `tests`] | No | `['security', 'correctness', 'deprecation', 'tests', 'documentation', 'performance', 'complexity', 'intent', 'ponytail', 'architecture', 'spec']` | Categories |
+| `categories` | list[`complexity` / `correctness` / `deprecation` / `documentation` / `intent` / `performance` / `ponytail` / `security` / `spec` / `tests`] | No | `['security', 'correctness', 'deprecation', 'tests', 'documentation', 'performance', 'complexity', 'intent', 'ponytail', 'spec']` | Categories |
 | `directory_rules` | list[DirectoryRule] | No | `[]` | Directory Rules |
 | `extra_lenses` | list[CustomLens] | No | `[]` | Extra Lenses |
 | `fail_on` | `critical` / `high` / `info` / `low` / `medium` / null | No | `null` |  |
@@ -8025,7 +8013,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "type": "object"
     },
     "ReviewCategory": {
-      "description": "A single review lens. The engine asks for each one in its own LLM call.\n\n``intent`` checks the diff against the PR's stated intent (title, description,\ncommit messages); it only runs when the context carries some stated intent.\n``ponytail`` is the \"lazy senior dev\" lens \u2014 the best code is the code you\nnever wrote \u2014 flagging code that needn't exist at all (YAGNI, reach for the\nstandard library, do it in fewer lines).\n``architecture`` flags design decisions the diff introduces that are\nexpensive to reverse \u2014 coupling across boundaries, dependency direction,\nbroken substitutability, misuse-prone public surface \u2014 each tied to a\nconcrete change scenario.\n``spec`` checks the diff against a specification the repository commits\n(OpenSpec, GitHub Spec Kit, Kiro); like ``intent`` it only runs when there is\nsomething to check against \u2014 here, a detected spec that matches the PR.",
+      "description": "A single review lens. The engine asks for each one in its own LLM call.\n\n``intent`` checks the diff against the PR's stated intent (title, description,\ncommit messages); it only runs when the context carries some stated intent.\n``ponytail`` is the \"lazy senior dev\" lens \u2014 the best code is the code you\nnever wrote \u2014 flagging code that needn't exist at all (YAGNI, reach for the\nstandard library, do it in fewer lines).\n``spec`` checks the diff against a specification the repository commits\n(OpenSpec, GitHub Spec Kit, Kiro); like ``intent`` it only runs when there is\nsomething to check against \u2014 here, a detected spec that matches the PR.",
       "enum": [
         "security",
         "correctness",
@@ -8036,7 +8024,6 @@ The canonical machine-readable schemas. These are the source of truth for provid
         "complexity",
         "intent",
         "ponytail",
-        "architecture",
         "spec"
       ],
       "title": "ReviewCategory",
@@ -8159,7 +8146,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "type": "object"
     },
     "ReviewPreset": {
-      "description": "How many model calls a review spends: the everyday path or the deep audit.\n\n``fast`` (the default) covers all ten everyday categories in FIVE calls,\none per concern: security, correctness (with stated intent folded in), code\nhealth, artefacts (tests + documentation), and architecture. The same five\nrun on every provider \u2014 worker count changes the schedule, not the call\ncount. A matched spec adds a sixth.\n``full`` runs each category as its own call for release\nbranches and deep audits. An explicit ``categories`` list always wins over\nthe preset.",
+      "description": "How many model calls a review spends: the everyday path or the deep audit.\n\n``fast`` (the default) covers all nine everyday categories in FOUR calls,\none per concern: security, correctness (with stated intent folded in), code\nhealth, and artefacts (tests + documentation). The same four run on every\nprovider \u2014 worker count changes the schedule, not the call count. A matched\nspec adds a fifth.\n``full`` runs each category as its own call for release\nbranches and deep audits. An explicit ``categories`` list always wins over\nthe preset.",
       "enum": [
         "fast",
         "full"
@@ -8351,7 +8338,6 @@ The canonical machine-readable schemas. These are the source of truth for provid
         "complexity",
         "intent",
         "ponytail",
-        "architecture",
         "spec"
       ],
       "items": {
@@ -9198,7 +9184,7 @@ model call, slowest first.
 
 | Column | Meaning |
 |---|---|
-| `call` | The [lens](glossary.md#lens) ID (`security`, `correctness`, `code-health`, `artefacts`, `architecture`, `spec`, a single category under `full`, or a custom lens ID), or another call: `reflect`, `triage`, `validate`, `repair:<lens>` |
+| `call` | The [lens](glossary.md#lens) ID (`security`, `correctness`, `code-health`, `artefacts`, `spec`, a single category under `full`, or a custom lens ID), or another call: `reflect`, `triage`, `validate`, `repair:<lens>` |
 | `batch` | Which [batch](glossary.md#batch) of files the call covered; `0` for calls outside the per-batch fan-out, such as `reflect` and `triage` |
 | `tries` | Requests actually issued, including adapter retries (`0` when unknown) |
 | `elapsed` | Wall time for the call, including retries |
@@ -9333,13 +9319,6 @@ miscount line numbers, so lgtmaybe finds the line whose text matches the anchor
 and posts the comment there. If no changed line matches, the finding moves into
 the review summary instead of landing on the wrong line.
 
-## Architecture Lens
-
-The [lens](#lens) that asks what a change will make hard to change later. It
-looks for coupling across boundaries, dependencies that point the wrong way,
-subclasses that break their base class, and APIs that are easy to misuse. Each
-of its findings opens with the change that would become painful.
-
 ## Batch
 
 A group of changed files sent to the model together. lgtmaybe sizes each batch
@@ -9443,7 +9422,7 @@ One focused review question for the model. Under the default
 [preset](#preset), some lenses share a model call; under `full`, each gets its
 own. The built-in lenses
 cover security, correctness, tests, documentation, performance, complexity,
-needless code ([ponytail](#ponytail)), architecture, intent, specs and
+needless code ([ponytail](#ponytail)), intent, specs and
 deprecated APIs. You can add your own. See
 [What gets reviewed](../explanation/what-gets-reviewed.md).
 
@@ -9476,7 +9455,7 @@ you never wrote."
 ## Preset
 
 How many model calls a review spends. `fast`, the default, covers every everyday
-[lens](#lens) in five calls. `full` gives each lens its own call, for deeper
+[lens](#lens) in four calls. `full` gives each lens its own call, for deeper
 audits.
 
 ## Prompt Cache
@@ -9966,7 +9945,7 @@ The same is true when no spec system is present, which is the common case, so
 a repository without specs pays nothing.
 
 Because it needs its own large block, the spec lens is a call of its own: a
-sixth call under the default `fast` preset, made only when a spec matched. Turn
+fifth call under the default `fast` preset, made only when a spec matched. Turn
 it off with `--no-spec` on the CLI, or `spec_review: false` in `.lgtmaybe.yml`
 or as an Action input.
 
@@ -10034,65 +10013,18 @@ We take Ponytail's leanness rules, not its whole review: Ponytail 5's own
 `/ponytail-review` also checks bugs, security, load, and tests, which here are
 separate lenses.
 
-## Architecture: What Will This Make Hard to Change?
-
-Architecture is the set of decisions that are expensive to reverse. This lens
-flags only decisions the change itself introduces, graded `info` to `medium`.
-Every finding has to open with a concrete change scenario: "when X changes, Y
-and Z have to change with it". A finding that only names a principle ("this
-violates SRP") is not allowed, because the name explains nothing on its own.
-
-- **Coupling across boundaries**: one module reaching into another's internals,
-  long call chains across a package or service boundary, or mutable state
-  shared between modules. Tight coupling inside one module is fine; the same
-  coupling across a boundary, on something likely to change, is the finding.
-- **Dependencies pointing the wrong way**: domain code importing a framework,
-  adapter, database or HTTP client, an import that closes a cycle, or a stable
-  module starting to depend on a volatile one.
-- **Broken substitutability (Liskov)**: an override that accepts less than its
-  base class, promises less, raises errors the base never did, or quietly does
-  nothing, and callers that branch on a concrete subclass instead. It only
-  claims this when the base class is in front of it.
-- **Misplaced responsibility**: a module gaining a second, unrelated reason to
-  change, logic that mostly works on another object's data, or one concept
-  spread so a single change needs edits in several places.
-- **Sharp edges**: new public surface that is easy to misuse, such as calls
-  that must happen in a hidden order, internal mutable state handed out, or
-  malformed input accepted silently.
-- **Leaky ports**: an interface that forces implementers to stub methods they
-  don't need, or vendor types crossing a port so the core is tied to the vendor.
-
-Its evidence bar keeps it from becoming a lecture:
-
-- It never proposes a new abstraction unless the diff shows a second
-  implementation or caller, or the coupling crosses a boundary the repository
-  already has.
-- It reads layers from the repository's own paths and documented architecture
-  rather than inventing them.
-- It skips tests, scripts and private helpers.
-- It hedges to `info` or `low` when the claim depends on code it cannot see.
-
-Most findings carry no one-click suggestion. The finding names a structural fix
-instead (move the function, invert the dependency).
-
-The ideas come from the classic literature on design:
-
-- Parnas on information hiding;
-- Constantine and Yourdon on coupling and cohesion;
-- Liskov and Wing on substitutability;
-- Meyer on design by contract;
-- Martin on dependency direction;
-- Cockburn's ports and adapters;
-- Evans on bounded contexts;
-- Fowler's refactoring catalogue;
-- Bloch on API design;
-- Khononov on balancing coupling.
-
-See [ATTRIBUTION.md](https://github.com/MattJColes/lgtmaybe/blob/main/ATTRIBUTION.md).
 The complexity lens asks "is this hard to follow?" and ponytail asks "should
-this exist?"; architecture asks "what will this make hard to change?". For a
-finer grain, the opt-in `pack:design` adds Ousterhout-style checks such as
-shallow modules and information leakage.
+this exist?". For review of structure, the opt-in `pack:design` adds
+Ousterhout-style checks such as shallow modules and information leakage.
+
+## Why a Review Can Stay Quiet
+
+A reviewer told to look for problems will find some. So lgtmaybe tells every
+lens that an empty result is the expected answer when a change has nothing worth
+raising. A finding has to be something a competent engineer would change before
+merging. A change that only swaps one acceptable form for another does not
+qualify. The [self-reflection](../reference/glossary.md#reflection) pass applies
+the same test to each finding, and it never drops an observable defect this way.
 
 ## When Lenses Disagree
 
@@ -10117,8 +10049,6 @@ tells the author two contradictory things, so lgtmaybe stops it at four points:
     without lenses knowing about each other:
 
     - ponytail never collapses an existing boundary;
-    - architecture never proposes a new one without a visible second
-      implementation;
     - complexity only suggests extracting duplicated code when the copies have
       uniform callers (never through a flag argument).
 
@@ -10126,9 +10056,9 @@ tells the author two contradictory things, so lgtmaybe stops it at four points:
     [self-reflection](../reference/glossary.md#reflection) pass sees every
     finding at once. When two give opposite advice about the same code, it
     keeps the one higher on the ladder: correctness, security, performance,
-    tests, architecture, complexity, ponytail. That is Ponytail 5's own review
-    order (correctness, safety, load, tests, speed, leanness) mapped onto these
-    lenses, with design slotted above readability. A finding whose lens is not
+    tests, complexity, ponytail. That is Ponytail 5's own review order
+    (correctness, safety, load, tests, speed, leanness) mapped onto these
+    lenses. A finding whose lens is not
     on the ladder, such as a custom or pack lens, is never arbitrated.
 
 4.  **A deterministic backstop.** After reflection (and even with
@@ -10136,7 +10066,7 @@ tells the author two contradictory things, so lgtmaybe stops it at four points:
 
     - it sits within three lines of a higher-ranked one; and
     - the two come from a lens pair declared opposed. Today that is ponytail
-      against correctness, security, and architecture.
+      against correctness and security.
 
     Group ids, custom and pack lenses, and scanner hits declare no opposition,
     so the backstop never guesses about them. It sees only where a finding
@@ -10157,13 +10087,13 @@ configurable in `.lgtmaybe.yml` (see
 
 | Knob | Default | Effect |
 |---|---|---|
-| `preset` | `fast` | `fast` uses five calls (security, correctness, code health, artefacts, architecture) on every provider, plus a sixth spec call when a spec matches; `full` runs one call per lens. |
+| `preset` | `fast` | `fast` uses four calls (security, correctness, code health, artefacts) on every provider, plus a fifth spec call when a spec matches; `full` runs one call per lens. |
 | `max_files` | 50 | Reviews the top-N changed files and posts a "reviewed top N of M" notice if there are more. |
 | `max_file_diff_lines` | 2000 | Skips any single file whose diff is longer, naming it in the summary. `0` disables. |
 | `max_input_tokens` | 100,000 | Batches the diff so each model call stays within budget. Left at the default, it is capped at what the model's context window can take. |
 | `max_concurrency` | 6, every provider | Concurrent model calls across the whole fan-out (all batches share one pool). Local throughput is set on the server (`OLLAMA_NUM_PARALLEL`, llama.cpp `-np`, vLLM batching); set this to `1` for serial. |
 | `max_review_seconds` | 3600 | Soft wall-clock ceiling: past it, queued calls are skipped and the review posts partial results with a notice. `0` disables. |
-| `categories` | all | Which review lenses run (the ten everyday lenses, plus `spec` when a spec matches). An explicit list overrides the preset grouping and runs each listed lens as its own call. |
+| `categories` | all | Which review lenses run (the nine everyday lenses, plus `spec` when a spec matches). An explicit list overrides the preset grouping and runs each listed lens as its own call. |
 | `context_lines` | 20 | Ceiling on surrounding lines added around each hunk; the budget may use fewer. `0` disables context expansion. |
 | `min_severity` | `low` (`medium` for a [`prototype` project](../how-to/calibrate-reviews-to-your-project.md)) | Drops findings below the floor (`info` → `low` → `medium` → `high` → `critical`). `low` keeps everything except pure-`info` narration. |
 | `include_paths` / `exclude_paths` | none | Glob filters to focus the review. |
@@ -10199,18 +10129,17 @@ Each finding has:
 | `category` | The lens that raised it |
 | `confidence` | The self-reflection auditor's 0-10 score (absent when reflection is off) |
 
-The ten everyday review categories are security, correctness, deprecation,
-tests, documentation, performance, complexity, intent, ponytail, and
-architecture. `spec` is an eleventh that runs only when a committed spec matches
-the PR. The default `fast` preset covers the ten in five calls, one per concern:
+The nine everyday review categories are security, correctness, deprecation,
+tests, documentation, performance, complexity, intent, and ponytail. `spec` is
+a tenth that runs only when a committed spec matches the PR. The default `fast`
+preset covers the nine in four calls, one per concern:
 
 - security;
 - correctness (with stated intent folded in);
 - code health (performance, complexity, ponytail, deprecation);
-- artefacts (tests, documentation);
-- architecture.
+- artefacts (tests, documentation).
 
-The same five run on every provider; worker count changes only how they are
+The same four run on every provider; worker count changes only how they are
 scheduled. `preset: full` runs each category as its own call, with a worked
 example of its own finding type.
 
@@ -10784,14 +10713,13 @@ the PR) and any custom lenses join the same fan-out.
     nothing and is dropped rather than mis-posted.
 
 3. **prompt + parse**: this stage **fans out one model call per review lens**,
-    and `preset` decides the lens set. `fast` (the default) covers all ten
-    everyday categories in **five calls**, one per concern:
+    and `preset` decides the lens set. `fast` (the default) covers all nine
+    everyday categories in **four calls**, one per concern:
 
     - security;
     - correctness, with stated intent when present;
     - code health: performance, complexity, ponytail, deprecation;
-    - artefacts: tests, documentation;
-    - architecture.
+    - artefacts: tests, documentation.
 
     `full` runs one call per category. Every (batch, lens) task shares **one
     `ThreadPoolExecutor`** over the synchronous provider port. It is sized by

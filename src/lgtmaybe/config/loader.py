@@ -19,7 +19,10 @@ from typing import Any
 import yaml
 
 from lgtmaybe.config import store
+from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import ReviewConfig
+
+_log = get_logger(__name__)
 
 # What the local CLI should do about a missing provider/model. Entrypoints with
 # a different configuration surface (the Action's inputs, GitLab CI) swap this
@@ -53,6 +56,9 @@ class ProviderNotConfigured(ValueError):
 # enable one by name — they have no repo-relative path to point at.
 _BUNDLED_LENSES_DIR = Path(__file__).resolve().parent.parent / "lenses"
 _PACK_SCHEME = "pack:"
+
+# A built-in lens that no longer exists but may still sit in a repository config.
+_RETIRED_CATEGORY = "architecture"
 
 
 def load_config(
@@ -94,6 +100,13 @@ def load_config(
     if lens_paths:
         loaded = _load_lens_files(lens_paths)
         merged["extra_lenses"] = list(merged.get("extra_lenses") or []) + loaded
+
+    # Action tags float, so rejecting a retired name would turn a release into
+    # red CI for every repository that listed its lenses. Remove at the next major.
+    categories = merged.get("categories")
+    if isinstance(categories, list) and _RETIRED_CATEGORY in categories:
+        _log.warning(f"ignoring removed review category {_RETIRED_CATEGORY!r}")
+        merged["categories"] = [c for c in categories if c != _RETIRED_CATEGORY]
 
     missing = tuple(key for key in ("provider", "model") if not merged.get(key))
     if missing:

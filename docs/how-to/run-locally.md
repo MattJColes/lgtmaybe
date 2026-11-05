@@ -478,7 +478,7 @@ The review makes five lens calls under the default `fast`
 [preset](../reference/glossary.md#preset) (one per category under
 `--preset full`). On a single-slot server those queue rather than overlap. So a
 slow model takes roughly `lens calls × per-call time`. That is why `fast` is the
-default: five calls instead of one per category is the biggest single local
+default: four calls instead of one per category is the biggest single local
 speed-up.
 
 To go faster:
@@ -489,8 +489,8 @@ To go faster:
 - Give the server more GPU.
 - Let the server run requests in parallel, if you have the memory, as described
   [above](#concurrency-on-a-local-server). vLLM does this out of the box. On
-  ollama, `OLLAMA_NUM_PARALLEL=5` makes the same five calls overlap instead of
-  queueing, close to a 5× wall-clock win.
+  ollama, `OLLAMA_NUM_PARALLEL=4` makes the same four calls overlap instead of
+  queueing, close to a 4× wall-clock win.
 
 Add `--profile` to any run to see the per-call breakdown.
 

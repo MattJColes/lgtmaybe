@@ -31,10 +31,6 @@ question for the model. The built-in lenses look for:
   or leave promised behaviour unimplemented.
 - **Ponytail:** code that need not exist, including places where the standard
   library or a simpler approach would do.
-- **Architecture:** design decisions that will be expensive to reverse, such as
-  tight coupling across boundaries, dependencies pointing the wrong way, broken
-  substitutability, and misuse-prone APIs. Each finding names the change that
-  would hurt.
 
 [What gets reviewed](docs/explanation/what-gets-reviewed.md) has the full scope
 and examples.
@@ -47,14 +43,13 @@ what lgtmaybe sends to a provider and how it handles
 [prompt injection](docs/reference/glossary.md#prompt-injection).
 
 **Fast by default.** A [preset](docs/reference/glossary.md#preset) sets how
-many model calls a review spends. The `fast` preset covers all ten everyday
-categories in five model calls:
+many model calls a review spends. The `fast` preset covers all nine everyday
+categories in four model calls:
 
 - security
 - correctness
 - code health
 - artefacts (tests and documentation)
-- architecture
 
 `--preset full` runs each category separately for a deeper audit. A committed
 spec that matches the change adds one spec-review call. All calls share one

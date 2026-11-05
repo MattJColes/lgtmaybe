@@ -1,0 +1,22 @@
+{
+  "name": "clean-change",
+  "changed_file": "billing/plans.py",
+  "expected": [],
+  "forbidden": [
+    {
+      "label": "FP: asks to replace the if with a conditional expression, an equally clear form",
+      "line": 6,
+      "keywords": ["ternary", "conditional expression", "one-liner", "single line"]
+    },
+    {
+      "label": "FP: asks for a named constant for a threshold used once beside its docstring",
+      "line": 6,
+      "keywords": ["magic number", "named constant", "extract a constant", "extract the threshold"]
+    },
+    {
+      "label": "FP: asks to rename a clear name",
+      "line": 4,
+      "keywords": ["rename", "more descriptive", "clearer name", "better name"]
+    }
+  ]
+}

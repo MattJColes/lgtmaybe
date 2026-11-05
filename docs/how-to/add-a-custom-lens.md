@@ -5,19 +5,17 @@ description: Add a custom review lens to lgtmaybe - a bring-your-own skill file 
 # Add a Custom Review Lens (BYO Skills)
 
 A [lens](../reference/glossary.md#lens) is one focused review question for the
-model. lgtmaybe ships eleven built-in review lenses:
+model. lgtmaybe ships ten built-in review lenses:
 
 - security, correctness, deprecation, tests, documentation, performance,
   complexity, intent and spec;
-- `ponytail`, the "lazy senior dev", write-less-code lens;
-- `architecture`, for design decisions that will be expensive to reverse.
+- `ponytail`, the "lazy senior dev", write-less-code lens.
 
 A **custom lens** adds your own. It runs alongside the built-ins as its own
 focused model call, and its findings merge into the same review. Use one to
 enforce a house style or team convention the built-in lenses don't cover.
 
-A custom lens can't reuse a built-in id. So a lens you named `architecture`
-before it became built-in needs a new id.
+A custom lens can't reuse a built-in id.
 
 ## Contents
 
@@ -34,8 +32,8 @@ before it became built-in needs a new id.
 Every lens, built-in or custom, has the same shape: a focused set of
 instructions and one worked example. Each custom lens is sent as its own model
 call, so the model concentrates on a single concern. (Under the default `fast`
-[preset](../reference/glossary.md#preset), the built-in lenses share five calls,
-plus a sixth when a committed spec matches.
+[preset](../reference/glossary.md#preset), the built-in lenses share four calls,
+plus a fifth when a committed spec matches.
 Under `full`, each built-in gets its own call.) A custom lens has these
 fields:
 

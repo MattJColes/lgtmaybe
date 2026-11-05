@@ -55,7 +55,7 @@ model call, slowest first.
 
 | Column | Meaning |
 |---|---|
-| `call` | The [lens](glossary.md#lens) ID (`security`, `correctness`, `code-health`, `artefacts`, `architecture`, `spec`, a single category under `full`, or a custom lens ID), or another call: `reflect`, `triage`, `validate`, `repair:<lens>` |
+| `call` | The [lens](glossary.md#lens) ID (`security`, `correctness`, `code-health`, `artefacts`, `spec`, a single category under `full`, or a custom lens ID), or another call: `reflect`, `triage`, `validate`, `repair:<lens>` |
 | `batch` | Which [batch](glossary.md#batch) of files the call covered; `0` for calls outside the per-batch fan-out, such as `reflect` and `triage` |
 | `tries` | Requests actually issued, including adapter retries (`0` when unknown) |
 | `elapsed` | Wall time for the call, including retries |

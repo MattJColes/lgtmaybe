@@ -61,11 +61,11 @@ The fan-out is the key non-obvious part. The prompt is composed per lens, and
 the engine issues **one concurrent model call per lens per batch** (a
 `ThreadPoolExecutor` over the synchronous provider port), then merges and
 de-duplicates the findings before the reflection pass. The default `fast`
-preset groups the ten everyday `ReviewCategory` values (security, correctness,
-deprecation, tests, documentation, performance, complexity, intent, ponytail,
-architecture) into **five** calls: security, correctness (with intent folded
-in), code health, artefacts, and architecture. `--preset full` (or `--full`)
-runs one call per category. The spec lens adds a sixth call only when a
+preset groups the nine everyday `ReviewCategory` values (security, correctness,
+deprecation, tests, documentation, performance, complexity, intent, ponytail)
+into **four** calls: security, correctness (with intent folded in), code
+health, and artefacts. `--preset full` (or `--full`) runs one call per
+category. The spec lens adds a fifth call only when a
 committed spec matches the change.
 [Architecture](docs/explanation/architecture.md) walks through every stage.
 
@@ -493,7 +493,7 @@ field, so a bare `impl Foo` block never binds by name.
 
 ### Measuring What the Fast Preset Trades Away
 
-The default `fast` preset covers the ten everyday lenses in five calls;
+The default `fast` preset covers the nine everyday lenses in four calls;
 `--preset full` runs one call per lens. What that grouping costs in recall
 depends on the model, so measure it on the model you actually run.
 `evals/ab.py` sweeps the preset on the current tree in one command; the first

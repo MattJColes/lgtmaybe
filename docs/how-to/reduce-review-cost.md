@@ -89,10 +89,10 @@ input tokens  ≈  batches × calls per batch × (diff + context padding + hints
 ```
 
 - **Calls per batch.** The `fast` [preset](../reference/glossary.md#preset)
-  (the default) makes five core calls per batch: security, correctness, code
-  health, artefacts (tests and documentation) and architecture. Under `fast`,
+  (the default) makes four core calls per batch: security, correctness, code
+  health, and artefacts (tests and documentation). Under `fast`,
   the intent check folds into the correctness call. `full` makes one call per
-  built-in category, up to ten. A matching committed spec adds its own call.
+  built-in category, up to nine. A matching committed spec adds its own call.
   This is the biggest multiplier in the formula.
 - **Batches.** A diff larger than `max_input_tokens` is split, and each batch
   pays for the full lens [fan-out](../reference/glossary.md#fan-out) again.
@@ -206,8 +206,8 @@ That is two calls per batch instead of the default five. Keep the list short.
 An explicit list turns off the `fast` preset's grouping, so listing six
 categories costs six calls, not five.
 
-Otherwise keep the default `fast` preset. `preset: full` doubles the call
-count (up to ten calls per batch instead of five) for a modest recall gain.
+Otherwise keep the default `fast` preset. `preset: full` more than doubles the
+call count (up to nine calls per batch instead of four) for a modest recall gain.
 
 ### 5. Review Less
 

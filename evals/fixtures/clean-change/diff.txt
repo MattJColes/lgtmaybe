@@ -1,0 +1,29 @@
+diff --git a/billing/plans.py b/billing/plans.py
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/billing/plans.py
+@@ -0,0 +1,8 @@
++"""Billing plan names."""
++
++
++def plan_label(seats: int) -> str:
++    """Return the billing plan name for a seat count."""
++    if seats <= 5:
++        return "starter"
++    return "team"
+diff --git a/tests/billing/test_plans.py b/tests/billing/test_plans.py
+new file mode 100644
+index 0000000..2222222
+--- /dev/null
++++ b/tests/billing/test_plans.py
+@@ -0,0 +1,9 @@
++from billing.plans import plan_label
++
++
++def test_five_seats_is_starter() -> None:
++    assert plan_label(5) == "starter"
++
++
++def test_six_seats_is_team() -> None:
++    assert plan_label(6) == "team"

@@ -241,14 +241,13 @@ the PR) and any custom lenses join the same fan-out.
     nothing and is dropped rather than mis-posted.
 
 3. **prompt + parse**: this stage **fans out one model call per review lens**,
-    and `preset` decides the lens set. `fast` (the default) covers all ten
-    everyday categories in **five calls**, one per concern:
+    and `preset` decides the lens set. `fast` (the default) covers all nine
+    everyday categories in **four calls**, one per concern:
 
     - security;
     - correctness, with stated intent when present;
     - code health: performance, complexity, ponytail, deprecation;
-    - artefacts: tests, documentation;
-    - architecture.
+    - artefacts: tests, documentation.
 
     `full` runs one call per category. Every (batch, lens) task shares **one
     `ThreadPoolExecutor`** over the synchronous provider port. It is sized by
