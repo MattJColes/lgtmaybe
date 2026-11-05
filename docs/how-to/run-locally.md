@@ -474,7 +474,7 @@ lgtmaybe review --provider ollama --model qwen3.6:35b --timeout 3600
 timeout: 3600
 ```
 
-The review makes five lens calls under the default `fast`
+The review makes four lens calls under the default `fast`
 [preset](../reference/glossary.md#preset) (one per category under
 `--preset full`). On a single-slot server those queue rather than overlap. So a
 slow model takes roughly `lens calls × per-call time`. That is why `fast` is the

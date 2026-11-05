@@ -201,16 +201,14 @@ flowchart TD
     compress --> correctness["correctness lens<br/>+ stated intent"]
     compress --> codehealth["code-health lens<br/>performance · complexity · ponytail · deprecation"]
     compress --> artefacts["artefacts lens<br/>tests · documentation"]
-    compress --> design["architecture lens<br/>coupling · dependency direction · substitutability"]
     security --> anchor["re-anchor<br/>snap lines to the real diff"]
     correctness --> anchor
     codehealth --> anchor
     artefacts --> anchor
-    design --> anchor
     anchor --> suppress["suppress<br/>ignored fingerprints · pragmas · 👎"] --> evidence["evidence gate<br/>defects need a failure scenario"] --> dedupe["merge / dedupe"] --> reflect["reflect<br/>validate scenarios · drop low-confidence"] --> arbitrate["arbitrate<br/>no opposite advice on the same code"] --> filter["filter<br/>severity floor · finding rules"] --> post["post<br/>inline comments + summary"]
 ```
 
-The five lens calls shown are the default `fast` grouping. The same five run on
+The four lens calls shown are the default `fast` grouping. The same four run on
 every provider; worker count decides only whether they overlap. The `full`
 [preset](../reference/glossary.md#preset) fans out one call per category. A
 [spec lens](../reference/glossary.md#spec-lens) (when a committed spec matches

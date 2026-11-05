@@ -202,9 +202,9 @@ batch:
 categories: [security, correctness]
 ```
 
-That is two calls per batch instead of the default five. Keep the list short.
+That is two calls per batch instead of the default four. Keep the list short.
 An explicit list turns off the `fast` preset's grouping, so listing six
-categories costs six calls, not five.
+categories costs six calls, not four.
 
 Otherwise keep the default `fast` preset. `preset: full` more than doubles the
 call count (up to nine calls per batch instead of four) for a modest recall gain.
@@ -468,8 +468,8 @@ reported. With this on, the lens may instead name the files or symbols it
 needs. lgtmaybe fetches them read-only and re-runs that one lens with them.
 
 The worst case is one extra model call per (batch, lens), each also carrying
-the fetched file text. On the default five-lens preset over three batches,
-that is up to fifteen extra calls: the multiplier in the formula above,
+the fetched file text. On the default four-lens preset over three batches,
+that is up to twelve extra calls: the multiplier in the formula above,
 doubled. In practice, only the lenses that defer pay it. The fetch is also
 capped at five files, within a quarter of `max_input_tokens`. Still, budget
 for the worst case.

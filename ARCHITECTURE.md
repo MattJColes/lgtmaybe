@@ -206,8 +206,8 @@ budget-scaled context → batch to token budget → fan out one call per review
 lens → parse → merge & dedupe → self-reflect → arbitrate opposing advice →
 filter by severity →
 findings + summary`. The lens set follows the `preset` — `fast` (default)
-covers the ten everyday categories in five calls (security, correctness, code
-health, artefacts, architecture) on every provider; `full` runs one call per
+covers the nine everyday categories in four calls (security, correctness, code
+health, artefacts) on every provider; `full` runs one call per
 category — and every
 (batch, lens) call shares one pool (`max_concurrency`: 8 cloud, 1
 ollama/openai-compatible) with a cacheable preamble-plus-diff prompt prefix on

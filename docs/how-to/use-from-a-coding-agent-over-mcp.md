@@ -104,7 +104,7 @@ full review per call.
 | `mode` | `branch` (default): committed branch changes against the base. `working`: branch commits plus uncommitted edits. `uncommitted`: only the uncommitted edits against `HEAD`. |
 | `base` | The base ref to diff against, like `--base`. Defaults to the remote's primary branch. |
 | `min_severity` | Drop findings below `info`, `low`, `medium`, `high` or `critical`. |
-| `preset` | `fast` (five model calls, plus a sixth when a committed spec matches) or `full` (one call per review category). |
+| `preset` | `fast` (four model calls, plus a fifth when a committed spec matches) or `full` (one call per review category). |
 
 The `preset` argument picks a [preset](../reference/glossary.md#preset): the
 set of [lenses](../reference/glossary.md#lens) a review runs.

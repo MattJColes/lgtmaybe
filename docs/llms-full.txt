@@ -3798,7 +3798,7 @@ lgtmaybe review --provider ollama --model qwen3.6:35b --timeout 3600
 timeout: 3600
 ```
 
-The review makes five lens calls under the default `fast`
+The review makes four lens calls under the default `fast`
 [preset](../reference/glossary.md#preset) (one per category under
 `--preset full`). On a single-slot server those queue rather than overlap. So a
 slow model takes roughly `lens calls × per-call time`. That is why `fast` is the
@@ -6443,7 +6443,7 @@ full review per call.
 | `mode` | `branch` (default): committed branch changes against the base. `working`: branch commits plus uncommitted edits. `uncommitted`: only the uncommitted edits against `HEAD`. |
 | `base` | The base ref to diff against, like `--base`. Defaults to the remote's primary branch. |
 | `min_severity` | Drop findings below `info`, `low`, `medium`, `high` or `critical`. |
-| `preset` | `fast` (five model calls, plus a sixth when a committed spec matches) or `full` (one call per review category). |
+| `preset` | `fast` (four model calls, plus a fifth when a committed spec matches) or `full` (one call per review category). |
 
 The `preset` argument picks a [preset](../reference/glossary.md#preset): the
 set of [lenses](../reference/glossary.md#lens) a review runs.
@@ -6708,9 +6708,9 @@ batch:
 categories: [security, correctness]
 ```
 
-That is two calls per batch instead of the default five. Keep the list short.
+That is two calls per batch instead of the default four. Keep the list short.
 An explicit list turns off the `fast` preset's grouping, so listing six
-categories costs six calls, not five.
+categories costs six calls, not four.
 
 Otherwise keep the default `fast` preset. `preset: full` more than doubles the
 call count (up to nine calls per batch instead of four) for a modest recall gain.
@@ -6974,8 +6974,8 @@ reported. With this on, the lens may instead name the files or symbols it
 needs. lgtmaybe fetches them read-only and re-runs that one lens with them.
 
 The worst case is one extra model call per (batch, lens), each also carrying
-the fetched file text. On the default five-lens preset over three batches,
-that is up to fifteen extra calls: the multiplier in the formula above,
+the fetched file text. On the default four-lens preset over three batches,
+that is up to twelve extra calls: the multiplier in the formula above,
 doubled. In practice, only the lenses that defer pay it. The fetch is also
 capped at five files, within a quarter of `max_input_tokens`. Still, budget
 for the worst case.
@@ -10673,16 +10673,14 @@ flowchart TD
     compress --> correctness["correctness lens<br/>+ stated intent"]
     compress --> codehealth["code-health lens<br/>performance · complexity · ponytail · deprecation"]
     compress --> artefacts["artefacts lens<br/>tests · documentation"]
-    compress --> design["architecture lens<br/>coupling · dependency direction · substitutability"]
     security --> anchor["re-anchor<br/>snap lines to the real diff"]
     correctness --> anchor
     codehealth --> anchor
     artefacts --> anchor
-    design --> anchor
     anchor --> suppress["suppress<br/>ignored fingerprints · pragmas · 👎"] --> evidence["evidence gate<br/>defects need a failure scenario"] --> dedupe["merge / dedupe"] --> reflect["reflect<br/>validate scenarios · drop low-confidence"] --> arbitrate["arbitrate<br/>no opposite advice on the same code"] --> filter["filter<br/>severity floor · finding rules"] --> post["post<br/>inline comments + summary"]
 ```
 
-The five lens calls shown are the default `fast` grouping. The same five run on
+The four lens calls shown are the default `fast` grouping. The same four run on
 every provider; worker count decides only whether they overlap. The `full`
 [preset](../reference/glossary.md#preset) fans out one call per category. A
 [spec lens](../reference/glossary.md#spec-lens) (when a committed spec matches
