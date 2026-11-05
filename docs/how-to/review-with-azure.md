@@ -67,7 +67,7 @@ permissions:
 The review step is:
 
 ```yaml
-- uses: MattJColes/lgtmaybe@v2
+- uses: MattJColes/lgtmaybe@v3
   with:
     provider: azure
     model: my-gpt-4o-deployment      # your Azure deployment name
@@ -113,7 +113,7 @@ permission. A supplied key always wins over ambient credentials, and the
 `azure-identity` package is not needed in this mode.
 
 ```yaml
-- uses: MattJColes/lgtmaybe@v2
+- uses: MattJColes/lgtmaybe@v3
   with:
     provider: azure
     model: my-gpt-4o-deployment

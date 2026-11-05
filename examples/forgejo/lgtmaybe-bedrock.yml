@@ -45,7 +45,7 @@ jobs:
     # sts.amazonaws.com audience and hands it to the AWS SDK.
     enable-openid-connect: true
     container:
-      image: ghcr.io/mattjcoles/lgtmaybe:v2
+      image: ghcr.io/mattjcoles/lgtmaybe:v3
     steps:
       - name: Review
         run: python -m lgtmaybe action

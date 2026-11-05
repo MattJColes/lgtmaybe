@@ -181,7 +181,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7 # base repo only, for .lgtmaybe.yml
-      - uses: MattJColes/lgtmaybe@v2
+      - uses: MattJColes/lgtmaybe@v3
         with:
           provider: openai
           model: gpt-5.5
@@ -230,28 +230,28 @@ Swap the `provider`, `model`, and `api_key` inputs:
 
 ```yaml
 # anthropic
-- uses: MattJColes/lgtmaybe@v2
+- uses: MattJColes/lgtmaybe@v3
   with:
     provider: anthropic
     model: claude-sonnet-4-6
     api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 
 # openrouter
-- uses: MattJColes/lgtmaybe@v2
+- uses: MattJColes/lgtmaybe@v3
   with:
     provider: openrouter
     model: anthropic/claude-sonnet-4.6
     api_key: ${{ secrets.OPENROUTER_API_KEY }}
 
 # zai (GLM / Zhipu AI)
-- uses: MattJColes/lgtmaybe@v2
+- uses: MattJColes/lgtmaybe@v3
   with:
     provider: zai
     model: glm-4.6
     api_key: ${{ secrets.ZAI_API_KEY }}
 
 # openai-compatible (here DeepSeek's hosted API)
-- uses: MattJColes/lgtmaybe@v2
+- uses: MattJColes/lgtmaybe@v3
   with:
     provider: openai-compatible
     model: deepseek-chat
@@ -367,7 +367,7 @@ review question for the model, such as security or correctness. The
 | `app_private_key` | none | Advanced: private key of your own App named by `app_id` |
 | `app_owner` | current repo's owner | Owner for a cross-repo App token |
 | `app_repositories` | current repo | Repositories the App token may access, newline- or comma-separated. Use with `app_owner` |
-| `image` | `ghcr.io/mattjcoles/lgtmaybe:v2` | Override the container image (advanced) |
+| `image` | `ghcr.io/mattjcoles/lgtmaybe:v3` | Override the container image (advanced) |
 
 The action passes `GITHUB_TOKEN` and the provider credentials into the
 container itself, so you do not set them as `env`.
@@ -389,7 +389,7 @@ permissions:
 
 # ...
 
-- uses: MattJColes/lgtmaybe@v2
+- uses: MattJColes/lgtmaybe@v3
   with:
     provider: openai
     model: gpt-5.5
@@ -546,21 +546,21 @@ filters, file caps, and more. Set `config_path` if it lives elsewhere.
 
 ## Pin to a Specific Version
 
-`@v2` is a floating tag: it tracks the latest `v2.x.x` release. To pin the
+`@v3` is a floating tag: it tracks the latest `v3.x.x` release. To pin the
 action exactly, use a full version tag:
 
 ```yaml
-uses: MattJColes/lgtmaybe@v2.11.1
+uses: MattJColes/lgtmaybe@v3.0.0
 ```
 
-The action's default `image` is the floating `ghcr.io/mattjcoles/lgtmaybe:v2`.
-Pinning the tag alone therefore still runs the newest v2 container. To pin the
+The action's default `image` is the floating `ghcr.io/mattjcoles/lgtmaybe:v3`.
+Pinning the tag alone therefore still runs the newest v3 container. To pin the
 reviewer too, set the image to the matching version tag (no `v` prefix):
 
 ```yaml
-uses: MattJColes/lgtmaybe@v2.11.1
+uses: MattJColes/lgtmaybe@v3.0.0
 with:
-  image: ghcr.io/mattjcoles/lgtmaybe:2.11.1
+  image: ghcr.io/mattjcoles/lgtmaybe:3.0.0
   # ...provider, model, api_key as usual
 ```
 

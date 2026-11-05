@@ -198,7 +198,7 @@ above works on any host below.
 
 | Host | How it runs | Token | Guide |
 |---|---|---|---|
-| GitHub | GitHub Action (`MattJColes/lgtmaybe@v2`) | `GITHUB_TOKEN` | [GitHub Action](docs/how-to/use-as-github-action.md) |
+| GitHub | GitHub Action (`MattJColes/lgtmaybe@v3`) | `GITHUB_TOKEN` | [GitHub Action](docs/how-to/use-as-github-action.md) |
 | GitLab | GitLab CI job (`lgtmaybe gitlab-ci`) | `GITLAB_TOKEN` | [Review on GitLab](docs/how-to/review-on-gitlab.md) |
 | Gitea | Gitea Actions (same container) | `GITEA_TOKEN` | [Review on Gitea](docs/how-to/review-on-gitea.md) |
 | Forgejo, Codeberg | Forgejo Actions (same container) | `GITEA_TOKEN` | [Review on Forgejo](docs/how-to/review-on-forgejo.md) |
@@ -315,7 +315,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7 # base repo only, for .lgtmaybe.yml
-      - uses: MattJColes/lgtmaybe@v2
+      - uses: MattJColes/lgtmaybe@v3
         with:
           provider: openai
           model: gpt-5.5
@@ -378,7 +378,7 @@ author identity. See [Post as lgtmaybe[bot]](docs/how-to/post-as-a-github-app.md
   ([details](docs/how-to/install-the-cli.md); the `brew trust` step is required for third-party taps)
 - **CLI (WinGet, Windows x64):** `winget install --id MattJColes.lgtmaybe --exact`
   ([details](docs/how-to/install-the-cli.md#install-on-windows-winget))
-- **GitHub Action:** `uses: MattJColes/lgtmaybe@v2`
+- **GitHub Action:** `uses: MattJColes/lgtmaybe@v3`
 
 ## Contributing
 

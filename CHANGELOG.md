@@ -1,5 +1,16 @@
 # Changelog
 
+## [3.0.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.15.5...lgtmaybe-v3.0.0) (2026-11-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **engine:** the `architecture` lens is gone. A gate that requires it in the hidden lenses marker must drop it.
+
+### Features
+
+* **engine:** remove the architecture lens and make silence the expected review outcome ([#877](https://github.com/MattJColes/lgtmaybe/issues/877)) ([2d63a77](https://github.com/MattJColes/lgtmaybe/commit/2d63a775991789412c2ed871ad5b9b0ee9ad79e5))
+
 ## [2.15.5](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.15.4...lgtmaybe-v2.15.5) (2026-11-02)
 
 

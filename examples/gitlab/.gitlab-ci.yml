@@ -33,7 +33,7 @@
 
 lgtmaybe:
   stage: test
-  image: ghcr.io/mattjcoles/lgtmaybe:v2
+  image: ghcr.io/mattjcoles/lgtmaybe:v3
   # Merge request pipelines only. Without this the job also runs on branch
   # pipelines, where there is no merge request to review — lgtmaybe says so and
   # exits non-zero, which reads as a broken pipeline rather than a misconfigured
