@@ -72,3 +72,37 @@ def test_set_rejects_unknown_key(cfg_home: Path) -> None:
 
 def test_load_absent_file_is_empty(cfg_home: Path) -> None:
     assert store.load() == {}
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [("max_concurrency", "0"), ("min_confidence", "11"), ("max_review_seconds", "-5")],
+)
+def test_set_rejects_out_of_range_number_and_leaves_file_untouched(
+    cfg_home: Path, key: str, value: str
+) -> None:
+    # An out-of-range value saved here would break every later review on load.
+    store.set_key("model", "kept")
+
+    with pytest.raises(ValueError, match=key):
+        store.set_key(key, value)
+
+    assert store.load() == {"model": "kept"}
+
+
+def test_set_accepts_in_range_constrained_value(cfg_home: Path) -> None:
+    store.set_key("max_concurrency", "4")
+
+    assert store.get_key("max_concurrency") == 4
+
+
+def test_set_error_names_key_and_value_without_pydantic_noise(cfg_home: Path) -> None:
+    with pytest.raises(ValueError) as excinfo:
+        store.set_key("min_severity", "bogus")
+
+    assert store.load() == {}
+
+    message = str(excinfo.value)
+    assert message.startswith("invalid value 'bogus' for min_severity: ")
+    assert "'critical'" in message  # the allowed values survive
+    assert "pydantic" not in message

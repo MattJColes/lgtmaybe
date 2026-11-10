@@ -210,6 +210,12 @@ Action, flags or `.lgtmaybe.yml` for `gitlab-ci` / `comment`).
 - **WHEN** `lgtmaybe config set` targets an API key
 - **THEN** it is refused; keys are read from env/flags at run time only
 
+#### Scenario: user sets a value the field would reject on load
+- **WHEN** `lgtmaybe config set` gets a value outside the field's type or
+  range (`max_concurrency 0`, an unknown `min_severity`)
+- **THEN** it is refused with one line naming the key and the value, and the
+  stored file is left unchanged
+
 #### Scenario: nothing configured on a fresh install
 - **WHEN** `lgtmaybe review` runs with no flag, repo file, or user config
   naming a provider and model
