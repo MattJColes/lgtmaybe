@@ -1,5 +1,26 @@
 # Changelog
 
+## [3.1.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v3.0.1...lgtmaybe-v3.1.0) (2026-11-10)
+
+
+### Features
+
+* **cli:** include each finding's fingerprint in JSON and MCP output ([#884](https://github.com/MattJColes/lgtmaybe/issues/884)) ([7e11af9](https://github.com/MattJColes/lgtmaybe/commit/7e11af9c736237165fde65f0add1e08ef4265c9c))
+* **cli:** print plain log lines in a terminal, keep JSON for CI ([#889](https://github.com/MattJColes/lgtmaybe/issues/889)) ([8c4e570](https://github.com/MattJColes/lgtmaybe/commit/8c4e570e165bb3caf845a790058ec36d606ce365))
+
+
+### Bug Fixes
+
+* **config:** reject out-of-range values in config set with a one-line error ([#882](https://github.com/MattJColes/lgtmaybe/issues/882)) ([0eef253](https://github.com/MattJColes/lgtmaybe/commit/0eef25330f5c9ffce1e5f8367adb3b2fa2a1e6d1))
+* **config:** say where list and mapping keys go when config set cannot take them ([#888](https://github.com/MattJColes/lgtmaybe/issues/888)) ([73a19ef](https://github.com/MattJColes/lgtmaybe/commit/73a19ef29563211ec47113ddf7edbbb3646fa97a))
+* **local:** name the ref and the fix when --base does not resolve ([#883](https://github.com/MattJColes/lgtmaybe/issues/883)) ([a9fdc72](https://github.com/MattJColes/lgtmaybe/commit/a9fdc7241602381e0aa27da353b60c3ab1d7de22))
+
+
+### Performance Improvements
+
+* **engine:** stop per-line token counts evicting whole-patch counts ([#886](https://github.com/MattJColes/lgtmaybe/issues/886)) ([b174667](https://github.com/MattJColes/lgtmaybe/commit/b174667f37776019d4d366f203530a127de832c9))
+* **github:** fetch commit subjects and manifests alongside the file contents ([#885](https://github.com/MattJColes/lgtmaybe/issues/885)) ([e4e43f3](https://github.com/MattJColes/lgtmaybe/commit/e4e43f3913c4d0ea6a620e10408d0d377021689f))
+
 ## [3.0.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v3.0.0...lgtmaybe-v3.0.1) (2026-11-08)
 
 
