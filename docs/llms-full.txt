@@ -3606,6 +3606,9 @@ The CLI prints a readable listing by default and never posts anywhere. Add
 lgtmaybe review --provider ollama --model qwen3.6:27b --json
 ```
 
+Each finding carries a `fingerprint`. To silence a finding you disagree with,
+add that value to `ignore_fingerprints` in `.lgtmaybe.yml`.
+
 ## Let an AI Agent Apply the Fixes
 
 `--format agent` prints the findings as correction instructions. An AI coding
