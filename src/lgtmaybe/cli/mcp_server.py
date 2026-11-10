@@ -227,8 +227,8 @@ def build_server(tools: LocalReviewTools) -> MCPServer:
         review_changes,
         title="Review local changes",
         description="Review the local git changes and return the findings as JSON: "
-        "`findings` (each with path, line, severity, title, body and an optional "
-        "suggestion), the `summary` line, and `incomplete` (true when some review "
+        "`findings` (each with path, line, severity, title, body, fingerprint and an "
+        "optional suggestion), the `summary` line, and `incomplete` (true when some review "
         "calls did not finish, so the findings may be partial).",
         annotations=annotations,
     )

@@ -7,6 +7,7 @@ import json
 
 from lgtmaybe.cli import render_findings
 from lgtmaybe.cli.render import flatten_details
+from lgtmaybe.core.findings import finding_fingerprint
 from lgtmaybe.core.models import ReviewFinding, Severity
 
 _FINDING = ReviewFinding(
@@ -40,7 +41,10 @@ def test_json_output_round_trips_to_findings() -> None:
     out = render_findings([_FINDING], "summary", fmt="json")
 
     parsed = json.loads(out)
-    assert parsed == [_FINDING.model_dump(mode="json")]
+    # The fingerprint is what `ignore_fingerprints` takes, so a user can
+    # silence a false positive from the JSON alone.
+    fingerprint = finding_fingerprint(_FINDING.path, _FINDING.title)
+    assert parsed == [{**_FINDING.model_dump(mode="json"), "fingerprint": fingerprint}]
 
 
 def test_agent_output_is_directive_and_carries_the_fix() -> None:

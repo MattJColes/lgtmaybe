@@ -24,7 +24,7 @@ import pytest
 from click.testing import CliRunner
 
 import lgtmaybe.cli as cli_module
-from lgtmaybe.cli import RuntimeOptions, main
+from lgtmaybe.cli import RuntimeOptions, main, render_findings
 from lgtmaybe.cli.mcp_server import (
     LocalReviewTools,
     PresetName,
@@ -111,9 +111,8 @@ class TestReviewChangesTool:
 
         result = _tools().review_changes()
 
-        expected = [
-            f.model_dump(mode="json") for f in FakeEngine(FakeProvider()).review(_CTX, _cfg())[0]
-        ]
+        findings = FakeEngine(FakeProvider()).review(_CTX, _cfg())[0]
+        expected = json.loads(render_findings(findings, "", fmt="json"))
         assert result["findings"] == expected
         assert result["summary"] == "1 findings · model llama3"
         assert result["incomplete"] is False
