@@ -546,3 +546,88 @@ def test_diff_refusal_with_unparseable_body_uses_fallback_reason() -> None:
 
     assert "would not serve the diff" in str(excinfo.value)
     assert "406" in str(excinfo.value)
+
+
+def _mock_context_routes() -> None:
+    """Every `get_pr_context` request except the two a test makes wait."""
+    respx.route(
+        method="GET", url=PR_URL, headers={"Accept": "application/vnd.github.v3.diff"}
+    ).mock(return_value=httpx.Response(200, content=_load("pr_diff.patch").encode()))
+    respx.route(method="GET", url=PR_URL).mock(
+        return_value=httpx.Response(200, json=_load_json("pr_detail.json"))
+    )
+    respx.route(method="GET", url__startswith=FILES_URL).mock(
+        return_value=httpx.Response(200, json=_load_json("pr_files_page1.json"))
+    )
+    respx.route(method="POST", url="https://api.github.com/graphql").mock(
+        return_value=httpx.Response(200, json={"data": {}})
+    )
+
+
+def _handshake(labels: tuple[str, str]):
+    """Handlers that each wait for the other to be in flight (no clock: see
+    `test_open_thread_count_overlaps_the_file_fetches`), and what each saw."""
+    import threading
+
+    in_flight = {label: threading.Event() for label in labels}
+    saw_other: dict[str, bool] = {}
+
+    def handler(label: str, response: httpx.Response):
+        other = labels[1] if label == labels[0] else labels[0]
+
+        def handle(request: httpx.Request) -> httpx.Response:
+            in_flight[label].set()
+            # Serial code leaves the first caller waiting out the timeout.
+            overlapped = in_flight[other].wait(10.0)
+            saw_other[label] = saw_other.get(label, True) and overlapped
+            return response
+
+        return handle
+
+    return handler, saw_other
+
+
+@respx.mock
+def test_commit_subjects_overlap_the_file_fetches() -> None:
+    """Commit subjects share nothing with the content fetches, so they ride the
+    same pool instead of adding a round trip after it has drained."""
+    _mock_context_routes()
+    handler, saw_other = _handshake(("commits", "content"))
+    respx.route(method="GET", url__startswith=COMMITS_URL).mock(
+        side_effect=handler("commits", httpx.Response(200, json=_load_json("pr_commits.json")))
+    )
+    respx.route(method="GET", url__startswith=f"{BASE_URL}/repos/{REPO}/contents/").mock(
+        side_effect=handler("content", httpx.Response(200, text="raw file content"))
+    )
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    ctx = gw.get_pr_context()
+
+    assert ctx.commit_messages  # still delivered
+    assert saw_other == {"commits": True, "content": True}
+
+
+@respx.mock
+def test_manifest_fetches_overlap_the_reviewable_file_fetches() -> None:
+    """With dependency scanning on, lockfiles and reviewable files are one wave,
+    not a manifest wave that finishes before any head text is requested."""
+    _mock_context_routes()
+    respx.route(method="GET", url__startswith=COMMITS_URL).mock(
+        return_value=httpx.Response(200, json=_load_json("pr_commits.json"))
+    )
+    handler, saw_other = _handshake(("manifest", "source"))
+    contents = f"{BASE_URL}/repos/{REPO}/contents/"
+    respx.route(method="GET", url__startswith=f"{contents}package-lock.json").mock(
+        side_effect=handler("manifest", httpx.Response(200, text="{}"))
+    )
+    respx.route(method="GET", url__startswith=f"{contents}src/").mock(
+        side_effect=handler("source", httpx.Response(200, text="raw file content"))
+    )
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.set_scan_manifests(True)
+    ctx = gw.get_pr_context()
+
+    assert set(ctx.scan_contents) == {"package-lock.json"}
+    assert set(ctx.file_contents) == {"src/app.py", "src/utils.py"}
+    assert saw_other == {"manifest": True, "source": True}
