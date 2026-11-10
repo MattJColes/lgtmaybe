@@ -81,7 +81,11 @@ class PlainFormatter(JsonFormatter):
 
 
 def _formatter() -> JsonFormatter:
-    """Plain text for a terminal, JSON for anything else (CI, a pipe, a file)."""
+    """Plain text for a terminal, JSON for anything else (CI, a pipe, a file).
+
+    Only an exact ``json`` or ``plain`` overrides the check; any other value is
+    read as unset, because a typo must not stop the tool from logging at all.
+    """
     wanted = os.environ.get("LGTMAYBE_LOG_FORMAT", "").lower()
     plain = wanted == "plain" or (wanted != "json" and sys.stderr.isatty())
     return PlainFormatter() if plain else JsonFormatter()

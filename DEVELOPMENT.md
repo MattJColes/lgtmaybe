@@ -172,7 +172,7 @@ no built-in default.
 
 lgtmaybe logs to stderr: plain lines in a terminal, JSON lines anywhere else
 (CI, a pipe, a file). `LGTMAYBE_LOG_FORMAT=json` or `plain` overrides that
-choice. Raise the level with `LGTMAYBE_LOG_LEVEL`,
+choice (any other value is ignored). Raise the level with `LGTMAYBE_LOG_LEVEL`,
 and add `LITELLM_LOG=DEBUG` to see litellm's request-level detail:
 
 ```bash

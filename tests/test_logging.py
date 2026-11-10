@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import sys
 
 import pytest
 
@@ -73,6 +74,20 @@ def test_plain_line_flags_warnings_and_redacts_secrets() -> None:
     out = PlainFormatter().format(rec)
 
     assert out.startswith("lgtmaybe: warning: auth header: ***REDACTED***")
+    assert "sk-plain-secret" not in out
+
+
+def test_plain_line_redacts_tracebacks() -> None:
+    register_secret("sk-plain-secret")
+    rec = _record("review failed")
+    try:
+        raise ValueError("token sk-plain-secret")
+    except ValueError:
+        rec.exc_info = sys.exc_info()
+
+    out = PlainFormatter().format(rec)
+
+    assert "ValueError: token ***REDACTED***" in out
     assert "sk-plain-secret" not in out
 
 
