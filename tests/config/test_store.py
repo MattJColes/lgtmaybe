@@ -90,9 +90,17 @@ def test_set_rejects_out_of_range_number_and_leaves_file_untouched(
     assert store.load() == {"model": "kept"}
 
 
+def test_set_accepts_in_range_constrained_value(cfg_home: Path) -> None:
+    store.set_key("max_concurrency", "4")
+
+    assert store.get_key("max_concurrency") == 4
+
+
 def test_set_error_names_key_and_value_without_pydantic_noise(cfg_home: Path) -> None:
     with pytest.raises(ValueError) as excinfo:
         store.set_key("min_severity", "bogus")
+
+    assert store.load() == {}
 
     message = str(excinfo.value)
     assert message.startswith("invalid value 'bogus' for min_severity: ")
