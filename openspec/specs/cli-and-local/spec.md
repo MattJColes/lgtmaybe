@@ -94,6 +94,10 @@ SHALL make no model call and print no LGTM; it exits non-zero, naming
 - **WHEN** `lgtmaybe review --uncommitted` runs and a new file is untracked
 - **THEN** the file is reviewed, unless `.gitignore` excludes it
 
+#### Scenario: developer names a base that does not exist
+- **WHEN** `--base` names a ref git cannot resolve (a typo, an unfetched branch)
+- **THEN** it fails naming the ref and pointing at `git fetch`, not git's output
+
 #### Scenario: review is started from a subdirectory
 - **WHEN** `lgtmaybe review` runs from a package directory, not the repo root
 - **THEN** it sees the whole worktree, with each file's head text loaded
@@ -205,6 +209,12 @@ Action, flags or `.lgtmaybe.yml` for `gitlab-ci` / `comment`).
 #### Scenario: user tries to persist a key
 - **WHEN** `lgtmaybe config set` targets an API key
 - **THEN** it is refused; keys are read from env/flags at run time only
+
+#### Scenario: user sets a value the field would reject on load
+- **WHEN** `lgtmaybe config set` gets a value outside the field's type or
+  range (`max_concurrency 0`, an unknown `min_severity`)
+- **THEN** it is refused with one line naming the key and the value, and the
+  stored file is left unchanged
 
 #### Scenario: nothing configured on a fresh install
 - **WHEN** `lgtmaybe review` runs with no flag, repo file, or user config

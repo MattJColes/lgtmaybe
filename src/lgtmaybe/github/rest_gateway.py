@@ -321,24 +321,28 @@ class RestGitHubGateway:
             if self._scan_manifests
             else []
         )
-        file_contents: dict[str, str] = {}
-        scan_contents: dict[str, str] = {}
         # +1, not a shared slot: the count must be free, and taking a worker
         # from the pool would narrow content fetching to
         # _CONTENT_FETCH_WORKERS - 1 for as long as the count runs — turning an
         # overlap into a slowdown on exactly the wide PRs the pool sizing is for.
-        with ThreadPoolExecutor(max_workers=_CONTENT_FETCH_WORKERS + 2) as pool:
+        with ThreadPoolExecutor(max_workers=_CONTENT_FETCH_WORKERS + 3) as pool:
             open_threads = pool.submit(self.count_open_finding_threads)
             # Like the count: metadata on its own slot, overlapping the fetches.
             stack = pool.submit(self._fetch_stack, meta)
-            if scannable:
-                scanned = pool.map(lambda p: (p, self._get_file_content(p, head_sha)), scannable)
-                scan_contents = {path: text for path, text in scanned if text is not None}
-            if reviewable:
-                results = pool.map(lambda p: (p, self._get_file_content(p, head_sha)), reviewable)
-                file_contents = {path: content for path, content in results if content is not None}
+            commits = pool.submit(self._fetch_commit_subjects)
+
+            def fetch(path: str) -> tuple[str, str | None]:
+                return path, self._get_file_content(path, head_sha)
+
+            # Both maps are submitted before either is read, so manifests and
+            # reviewable files are one wave rather than two in sequence.
+            scanned = pool.map(fetch, scannable)
+            results = pool.map(fetch, reviewable)
+            scan_contents = {path: text for path, text in scanned if text is not None}
+            file_contents = {path: text for path, text in results if text is not None}
             open_finding_threads = open_threads.result()
             pr_stack = stack.result()
+            commit_messages = commits.result()
 
         return PRContext(
             diff=diff,
@@ -351,7 +355,7 @@ class RestGitHubGateway:
             scan_contents=scan_contents,
             title=meta.get("title") or "",
             description=meta.get("body") or "",
-            commit_messages=self._fetch_commit_subjects(),
+            commit_messages=commit_messages,
             head_branch=_head_ref(meta),
             open_finding_threads=open_finding_threads,
             stack=pr_stack,

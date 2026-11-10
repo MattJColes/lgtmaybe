@@ -655,3 +655,15 @@ def test_a_textconv_filter_cannot_rewrite_the_patch_content(
 
     assert "+    return 2" in ctx.diff
     assert "RETURN" not in ctx.diff
+
+
+@pytest.mark.parametrize("working", [False, True])
+def test_unknown_base_names_the_ref_and_the_fix(repo: Path, working: bool) -> None:
+    # Raw `git rev-parse` output advises `--`, which lgtmaybe cannot take.
+    with pytest.raises(ValueError) as excinfo:
+        local_pr_context(base="nope-branch", working=working, cwd=repo)
+
+    message = str(excinfo.value)
+    assert "base ref 'nope-branch' not found" in message
+    assert "git fetch" in message
+    assert "ambiguous argument" not in message

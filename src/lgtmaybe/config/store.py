@@ -10,10 +10,10 @@ from __future__ import annotations
 import os
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import yaml
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from lgtmaybe.core.models import ReviewConfig
 
@@ -81,8 +81,15 @@ def _validate_key(key: str) -> None:
 
 def _coerce(key: str, value: str) -> Any:
     """Coerce a string value to the field's type, storing enums as plain values."""
-    # FieldInfo.annotation is typed Optional, but every ReviewConfig field is
-    # annotated (``_validate_key`` has already confirmed the key exists).
-    annotation: Any = ReviewConfig.flat_fields()[key].annotation
-    coerced: Any = TypeAdapter(annotation).validate_strings(value)
+    # The FieldInfo rides along as Annotated metadata so its range limits
+    # (``ge``/``le``) apply here: a bare annotation would save a value that
+    # fails every later load.
+    field = ReviewConfig.flat_fields()[key]
+    annotated: Any = Annotated[field.annotation, field]
+    adapter: TypeAdapter[Any] = TypeAdapter(annotated)
+    try:
+        coerced: Any = adapter.validate_strings(value)
+    except ValidationError as exc:
+        reason = exc.errors()[0]["msg"]
+        raise ValueError(f"invalid value {value!r} for {key}: {reason}") from exc
     return coerced.value if isinstance(coerced, Enum) else coerced

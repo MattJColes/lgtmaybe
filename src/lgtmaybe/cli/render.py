@@ -66,9 +66,13 @@ def findings_payload(findings: list[ReviewFinding]) -> list[dict[str, Any]]:
     """The findings as JSON-ready dicts: the ``json`` format's one shape.
 
     Shared by ``--format json`` and the MCP server's structured result, so an
-    agent reads the same fields whichever way it asked.
+    agent reads the same fields whichever way it asked. ``fingerprint`` is the
+    id ``ignore_fingerprints`` takes, so a finding can be silenced from here.
     """
-    return [f.model_dump(mode="json") for f in findings]
+    return [
+        {**f.model_dump(mode="json"), "fingerprint": finding_fingerprint(f.path, f.title)}
+        for f in findings
+    ]
 
 
 def render_findings(
