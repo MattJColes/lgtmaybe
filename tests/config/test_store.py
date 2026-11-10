@@ -106,3 +106,15 @@ def test_set_error_names_key_and_value_without_pydantic_noise(cfg_home: Path) ->
     assert message.startswith("invalid value 'bogus' for min_severity: ")
     assert "'critical'" in message  # the allowed values survive
     assert "pydantic" not in message
+
+
+@pytest.mark.parametrize("key", ["exclude_paths", "static_analysis", "extra_lenses"])
+def test_set_refuses_a_list_or_mapping_key_and_says_where_it_goes(cfg_home: Path, key: str) -> None:
+    # One string cannot express these, so pydantic's "valid array" was a dead end.
+    with pytest.raises(ValueError) as excinfo:
+        store.set_key(key, "docs/**")
+
+    message = str(excinfo.value)
+    assert f"{key} holds a list or mapping" in message
+    assert str(store.user_config_path()) in message
+    assert ".lgtmaybe.yml" in message

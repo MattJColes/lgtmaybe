@@ -10,10 +10,10 @@ from __future__ import annotations
 import os
 from enum import Enum
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, get_origin
 
 import yaml
-from pydantic import TypeAdapter, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from lgtmaybe.core.models import ReviewConfig
 
@@ -85,7 +85,15 @@ def _coerce(key: str, value: str) -> Any:
     # (``ge``/``le``) apply here: a bare annotation would save a value that
     # fails every later load.
     field = ReviewConfig.flat_fields()[key]
-    annotated: Any = Annotated[field.annotation, field]
+    annotation = field.annotation
+    if get_origin(annotation) is list or (
+        isinstance(annotation, type) and issubclass(annotation, BaseModel)
+    ):
+        raise ValueError(
+            f"{key} holds a list or mapping, which `config set` cannot take; "
+            f"edit {user_config_path()} or the repo's .lgtmaybe.yml instead"
+        )
+    annotated: Any = Annotated[annotation, field]
     adapter: TypeAdapter[Any] = TypeAdapter(annotated)
     try:
         coerced: Any = adapter.validate_strings(value)
