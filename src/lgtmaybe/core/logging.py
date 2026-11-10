@@ -1,8 +1,10 @@
 """Structured, secret-safe logging.
 
-JSON lines for CI debugging, level via ``LGTMAYBE_LOG_LEVEL``. A formatter that
-redacts any value registered with :func:`register_secret` from the message,
-extras, and tracebacks — so an API key never lands in a log line.
+JSON lines for CI debugging, level via ``LGTMAYBE_LOG_LEVEL``. A terminal gets
+the same records as plain text instead (``LGTMAYBE_LOG_FORMAT=json|plain``
+overrides the check). Both formatters redact any value registered with
+:func:`register_secret` from the message, extras, and tracebacks — so an API
+key never lands in a log line.
 """
 
 from __future__ import annotations
@@ -10,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 from typing import Any
 
 _secrets: set[str] = set()
@@ -56,12 +59,44 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, default=str)
 
 
+class PlainFormatter(JsonFormatter):
+    """Render a log record as one redacted line of text, for a person to read.
+
+    A subclass so ``get_logger`` recognises either as its own handler.
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        level = "" if record.levelno <= logging.INFO else f"{record.levelname.lower()}: "
+        extras = ", ".join(
+            f"{key}={_redact_value(value)}"
+            for key, value in record.__dict__.items()
+            if key not in _STD_ATTRS
+        )
+        line = f"lgtmaybe: {level}{_redact(record.getMessage())}"
+        if extras:
+            line += f" ({extras})"
+        if record.exc_info:
+            line += "\n" + _redact(self.formatException(record.exc_info))
+        return line
+
+
+def _formatter() -> JsonFormatter:
+    """Plain text for a terminal, JSON for anything else (CI, a pipe, a file).
+
+    Only an exact ``json`` or ``plain`` overrides the check; any other value is
+    read as unset, because a typo must not stop the tool from logging at all.
+    """
+    wanted = os.environ.get("LGTMAYBE_LOG_FORMAT", "").lower()
+    plain = wanted == "plain" or (wanted != "json" and sys.stderr.isatty())
+    return PlainFormatter() if plain else JsonFormatter()
+
+
 def get_logger(name: str = "lgtmaybe") -> logging.Logger:
-    """Return a logger that emits redacted JSON lines to stderr."""
+    """Return a logger that emits redacted lines to stderr."""
     logger = logging.getLogger(name)
     if not any(isinstance(h.formatter, JsonFormatter) for h in logger.handlers):
         handler = logging.StreamHandler()
-        handler.setFormatter(JsonFormatter())
+        handler.setFormatter(_formatter())
         logger.addHandler(handler)
         logger.propagate = False
     logger.setLevel(os.environ.get("LGTMAYBE_LOG_LEVEL", "INFO").upper())
