@@ -6,10 +6,19 @@ import io
 import json
 import logging
 import sys
+from collections.abc import Iterator
 
 import pytest
 
+from lgtmaybe.core import logging as lgtmaybe_logging
 from lgtmaybe.core.logging import JsonFormatter, PlainFormatter, get_logger, register_secret
+
+
+@pytest.fixture(autouse=True)
+def _restore_secrets(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    # Secrets registered here must not redact output in tests that run later.
+    monkeypatch.setattr(lgtmaybe_logging, "_secrets", set(lgtmaybe_logging._secrets))
+    yield
 
 
 def _record(msg: str, *args: object, **extra: object) -> logging.LogRecord:
