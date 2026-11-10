@@ -76,8 +76,8 @@ def local_pr_context(
     Commit subjects between the base and HEAD are collected in branch and
     working mode (the stated intent for the intent lens); uncommitted edits are
     not described by any commit, so ``uncommitted`` mode collects none. Raises
-    ValueError when git is missing or this is not a git repository, and
-    LocalGitError when a git command hangs.
+    ValueError when git is missing, this is not a git repository, or ``base``
+    names a ref git cannot resolve, and LocalGitError when a git command hangs.
     """
     if working and uncommitted:
         raise ValueError("--working and --uncommitted are mutually exclusive")
