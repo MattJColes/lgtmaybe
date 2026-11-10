@@ -95,6 +95,12 @@ def local_pr_context(
         base_sha = head_sha  # base and head are both HEAD — resolved once above
         commit_messages: list[str] = []
     else:
+        if base and not _ref_exists(cwd, base):
+            # git's own message advises `--`, which lgtmaybe cannot take.
+            raise ValueError(
+                f"base ref {base!r} not found; check the name, or run `git fetch` "
+                "and name the remote branch (e.g. --base origin/main)"
+            )
         base_ref = base or default_base(cwd)
         if working:
             merge_base = _git(cwd, "merge-base", base_ref, "HEAD").strip()

@@ -94,6 +94,10 @@ SHALL make no model call and print no LGTM; it exits non-zero, naming
 - **WHEN** `lgtmaybe review --uncommitted` runs and a new file is untracked
 - **THEN** the file is reviewed, unless `.gitignore` excludes it
 
+#### Scenario: developer names a base that does not exist
+- **WHEN** `--base` names a ref git cannot resolve (a typo, an unfetched branch)
+- **THEN** it fails naming the ref and pointing at `git fetch`, not git's output
+
 #### Scenario: review is started from a subdirectory
 - **WHEN** `lgtmaybe review` runs from a package directory, not the repo root
 - **THEN** it sees the whole worktree, with each file's head text loaded
