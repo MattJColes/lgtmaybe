@@ -822,3 +822,17 @@ class TestLinesEndAtNewlineOnly:
 
         new_side = [(new, text) for _, kind, _, new, text in walk_diff(out) if kind != "-"]
         assert new_side == [(1, "a\r"), (2, "b\r"), (3, "C\r"), (4, "d\r")]
+
+
+def test_per_line_counting_does_not_evict_whole_text_counts() -> None:
+    """A whole patch is counted, split line by line, then counted again. The
+    line counts must not push the patch out of the memo: each line would take a
+    slot, so one large hunk used to flush every whole-text count."""
+    patch = "whole patch text " * 50
+    count_tokens.cache_clear()
+    count_tokens(patch)
+
+    take_lines([f"line {n}" for n in range(1000)], budget=10**9)
+    count_tokens(patch)
+
+    assert count_tokens.cache_info().hits == 1

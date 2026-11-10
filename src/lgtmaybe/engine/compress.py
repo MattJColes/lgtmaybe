@@ -80,6 +80,16 @@ def count_tokens(text: str) -> int:
     reflection deferral hop — and encoding is O(len) each time. Bounded so the
     cache can't retain an unbounded number of large diff strings.
     """
+    return _count_line(text)
+
+
+def _count_line(text: str) -> int:
+    """``count_tokens`` without the memo, for callers counting line by line.
+
+    A line is cheap to encode and rarely repeats, but each one would take a
+    memo slot: one large hunk used to evict every whole-patch count the memo
+    exists to keep.
+    """
     counter = _counter_for()
     if counter is not None:
         return counter(text)
@@ -113,7 +123,7 @@ def take_lines(lines: Iterable[str], budget: int) -> list[str]:
     kept: list[str] = []
     used = 0
     for line in lines:
-        used += count_tokens(line) + 1
+        used += _count_line(line) + 1
         if used > budget:
             break
         kept.append(line)
@@ -185,7 +195,7 @@ def split_hunk_by_budget(unit: str, max_tokens: int) -> list[str]:
         marker = line[:1]
         old_at.append(old_at[-1] + (0 if marker in ("+", "\\") else 1))
         new_at.append(new_at[-1] + (0 if marker in ("-", "\\") else 1))
-    costs = [count_tokens(line) for line in body]
+    costs = [_count_line(line) for line in body]
 
     def render(start: int, end: int) -> str:
         return (
