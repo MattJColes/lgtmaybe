@@ -170,7 +170,9 @@ no built-in default.
 
 ### Debugging a Local Run
 
-lgtmaybe logs JSON lines to stderr. Raise the level with `LGTMAYBE_LOG_LEVEL`,
+lgtmaybe logs to stderr: plain lines in a terminal, JSON lines anywhere else
+(CI, a pipe, a file). `LGTMAYBE_LOG_FORMAT=json` or `plain` overrides that
+choice. Raise the level with `LGTMAYBE_LOG_LEVEL`,
 and add `LITELLM_LOG=DEBUG` to see litellm's request-level detail:
 
 ```bash
