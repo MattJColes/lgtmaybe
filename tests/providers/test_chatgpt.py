@@ -73,8 +73,10 @@ def _write_token(directory: Path, *, expires_in: int = 3600) -> Path:
         {},
         {"CHATGPT_TOKEN_DIR": "/somewhere/tokens"},
         {"CHATGPT_TOKEN_DIR": "/somewhere/tokens", "CHATGPT_AUTH_FILE": "other.json"},
+        {"CHATGPT_TOKEN_DIR": "relative/tokens"},
+        {"CHATGPT_TOKEN_DIR": "~/tokens"},
     ],
-    ids=["default", "token-dir", "token-dir-and-file"],
+    ids=["default", "token-dir", "token-dir-and-file", "relative-dir", "home-dir"],
 )
 def test_token_file_matches_where_litellm_reads_it(
     env: dict[str, str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path

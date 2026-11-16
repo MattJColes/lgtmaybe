@@ -92,6 +92,17 @@ class IdentityBrokerStack(Stack):
             bundle_code=bundle_code,
         )
         private_key.grant_read(broker)
+        # Drop this, and move the runtime, once Lambda's python3.15 is generally
+        # available: the rule fires as soon as CDK lists a newer runtime.
+        Validations.of(broker).acknowledge(
+            Acknowledgment(
+                id="AwsSolutions::AwsSolutions-L1",
+                reason=(
+                    "python3.15 is a Lambda public preview runtime: no SLA and not "
+                    "for production. python3.14 is the newest generally available one."
+                ),
+            )
+        )
 
         api = apigwv2.HttpApi(
             self,

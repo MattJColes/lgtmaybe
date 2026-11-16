@@ -40,10 +40,15 @@ class ChatGPTLoginError(Exception):
 
 
 def token_file(env: Mapping[str, str] | None = None) -> Path:
-    """Where litellm keeps the ChatGPT sign-in, honouring its env overrides."""
+    """Where litellm keeps the ChatGPT sign-in, honouring its env overrides.
+
+    litellm expands ``~`` and makes the path absolute, so this does too: a
+    relative or ``~`` override must name the same file in both.
+    """
     env = os.environ if env is None else env
-    directory = env.get("CHATGPT_TOKEN_DIR", os.path.expanduser(_DEFAULT_TOKEN_DIR))
-    return Path(directory) / env.get("CHATGPT_AUTH_FILE", _DEFAULT_AUTH_FILE)
+    directory = env.get("CHATGPT_TOKEN_DIR", _DEFAULT_TOKEN_DIR)
+    path = os.path.join(directory, env.get("CHATGPT_AUTH_FILE", _DEFAULT_AUTH_FILE))
+    return Path(os.path.abspath(os.path.expanduser(path)))
 
 
 def signed_in(env: Mapping[str, str] | None = None) -> bool:

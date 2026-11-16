@@ -15,7 +15,9 @@ litellm model-string conventions:
 
 from __future__ import annotations
 
+import importlib
 from collections.abc import Callable, Iterable
+from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
 from lgtmaybe.core.logging import get_logger, register_secret
@@ -252,6 +254,25 @@ def dropped_params(provider: Provider, model: str, params: Iterable[str]) -> lis
     )
 
 
+# Where litellm keeps its effort resolver, newest home first. It is internal, and
+# 1.109 moved it out of ``router_utils``; the dependency floor still admits
+# releases that keep it there, so both are tried.
+_EFFORT_CAPABILITY_HOMES = (
+    "litellm.litellm_core_utils.reasoning_effort_capability",
+    "litellm.router_utils.reasoning_effort_capability",
+)
+
+
+def _effort_capability_module() -> ModuleType:
+    """litellm's effort resolver, from whichever home the installed release has."""
+    for home in _EFFORT_CAPABILITY_HOMES:
+        try:
+            return importlib.import_module(home)
+        except ImportError:
+            continue
+    raise ImportError("litellm has no reasoning_effort_capability module")
+
+
 def declared_effort_capability(
     provider: Provider, model: str
 ) -> tuple[frozenset[str] | None, str | None]:
@@ -268,15 +289,14 @@ def declared_effort_capability(
     Fails OPEN like ``dropped_params`` and for the same reason: an entry with no
     effort metadata, or with ``supports_reasoning: false`` — contradicted by the
     very truncation that makes this consulted — is no opinion, not an empty set.
-    The resolver lives in litellm's router internals, outside its public API, so
-    any import or lookup failure is no opinion too.
+    The resolver lives in litellm's internals, outside its public API (see
+    ``_EFFORT_CAPABILITY_HOMES``), so any import or lookup failure is no opinion
+    too.
     """
     try:
         import litellm
-        from litellm.router_utils.reasoning_effort_capability import (
-            declared_reasoning_efforts,
-            resolve_supported_reasoning_efforts,
-        )
+
+        resolver = _effort_capability_module()
 
         routed = f"{_PREFIXES[provider]}/{model}"
         key = next(
@@ -289,9 +309,11 @@ def declared_effort_capability(
         entry: dict[str, Any] = {**litellm.model_cost[key], "key": key}
         levels: tuple[str, ...] | None = None
         if entry.get("supports_reasoning") is not False:
-            levels = declared_reasoning_efforts(entry)
+            levels = resolver.declared_reasoning_efforts(entry)
             if levels is None:
-                levels = resolve_supported_reasoning_efforts(entry, deployment_is_mapped=False)
+                levels = resolver.resolve_supported_reasoning_efforts(
+                    entry, deployment_is_mapped=False
+                )
         default = entry.get("default_reasoning_effort")
         owner = entry.get("litellm_provider")
         if default is None and isinstance(owner, str) and key.startswith(f"{owner}/"):
