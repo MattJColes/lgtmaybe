@@ -12,6 +12,8 @@ import pytest
 
 from lgtmaybe.core.models import Provider, ProviderResult
 from lgtmaybe.providers.factory import (
+    _EFFORT_CAPABILITY_HOMES,
+    _effort_capability_module,
     build_provider,
     declared_effort_capability,
     litellm_model_string,
@@ -659,7 +661,7 @@ class TestDeclaredEffortCapability:
         assert declared_effort_capability(Provider.openai, "gpt-4o") == (None, None)
 
     def test_a_resolver_failure_declares_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from litellm.router_utils import reasoning_effort_capability as capability
+        capability = _effort_capability_module()
 
         def boom(*_a: object, **_k: object) -> None:
             raise RuntimeError("internal API moved")
@@ -674,9 +676,27 @@ class TestDeclaredEffortCapability:
     ) -> None:
         import sys
 
-        monkeypatch.setitem(sys.modules, "litellm.router_utils.reasoning_effort_capability", None)
+        for home in _EFFORT_CAPABILITY_HOMES:
+            monkeypatch.setitem(sys.modules, home, None)
 
         assert declared_effort_capability(Provider.openai, "gpt-5.5") == (None, None)
+
+    @pytest.mark.parametrize("home", _EFFORT_CAPABILITY_HOMES)
+    def test_the_resolver_is_found_at_either_home(
+        self, monkeypatch: pytest.MonkeyPatch, home: str
+    ) -> None:
+        """litellm 1.109 moved the resolver out of `router_utils`. The floor in
+        `pyproject.toml` still admits releases that keep it there, so the lookup
+        must answer from whichever home the installed litellm has."""
+        import sys
+
+        resolver = _effort_capability_module()
+        for other in _EFFORT_CAPABILITY_HOMES:
+            monkeypatch.setitem(sys.modules, other, resolver if other == home else None)
+
+        levels, _ = declared_effort_capability(Provider.openai, "gpt-5.5")
+
+        assert levels is not None and "minimal" not in levels
 
 
 class TestBuildProviderStepsWithinTheDeclaredSet:
@@ -706,7 +726,7 @@ class TestBuildProviderStepsWithinTheDeclaredSet:
         assert provider.disable_reasoning() == {"reasoning_effort": "none"}
 
     def test_a_resolver_failure_keeps_todays_ladder(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from litellm.router_utils import reasoning_effort_capability as capability
+        capability = _effort_capability_module()
 
         def boom(*_a: object, **_k: object) -> None:
             raise RuntimeError("internal API moved")
@@ -720,7 +740,7 @@ class TestBuildProviderStepsWithinTheDeclaredSet:
     def test_healthy_request_opts_are_unchanged(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The capability set steers the retry only: the opts every healthy call
         is sent with are byte-identical whether the map declared it or not."""
-        from litellm.router_utils import reasoning_effort_capability as capability
+        capability = _effort_capability_module()
 
         declared = build_provider(Provider.openai, "gpt-5.5", api_key="k", reasoning_effort="low")
 
