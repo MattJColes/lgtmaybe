@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v3.1.0...lgtmaybe-v3.1.1) (2026-11-16)
+
+
+### Dependencies
+
+* bump the python-dependencies group across 1 directory with 2 updates ([#892](https://github.com/MattJColes/lgtmaybe/issues/892)) ([6e7fe84](https://github.com/MattJColes/lgtmaybe/commit/6e7fe849f068e97b005986b0635cc505c7b92921))
+
 ## [3.1.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v3.0.1...lgtmaybe-v3.1.0) (2026-11-16)
 
 
